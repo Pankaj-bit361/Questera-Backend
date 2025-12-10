@@ -227,10 +227,14 @@ Output JSON:
     const count = intent.contentJob?.count || 1;
     const isCampaign = count > 1 || intent.intent === 'campaign';
 
-    // Build context for prompt generation
-    const contextString = await this.memoryService.buildContextForLLM(userId);
+    // Build context for prompt generation - only use preferences, not old conversation facts
+    // This prevents previous conversation themes (like "Superman") from bleeding into new chats
+    const contextString = await this.memoryService.buildContextForLLM(userId, {
+      includeMemories: true,
+      onlyPreferences: true
+    });
 
-    // Step 1: Generate design brief
+    // Step 1: Generate design brief based on current message + brand preferences only
     const designBrief = await this.contentEngine.generateDesignBrief(message, {
       profileContext: contextString,
       referenceType: referenceImages.length > 0 ? 'face' : null,

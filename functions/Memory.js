@@ -235,14 +235,16 @@ class MemoryService {
 
   /**
    * Build context string for LLM from memories and profile
+   * @param {string} userId
+   * @param {object} options - { includeMemories: true, onlyPreferences: false }
    */
-  async buildContextForLLM(userId) {
+  async buildContextForLLM(userId, options = {}) {
+    const { includeMemories = true, onlyPreferences = false } = options;
     const profile = await this.getActiveProfile(userId);
-    const memories = await this.getMemories(userId, { minImportance: 2, limit: 30 });
 
     let context = '';
 
-    // Profile context
+    // Profile context (always include basic profile info)
     if (profile) {
       context += `\n## User Profile\n`;
       context += `Type: ${profile.type}\n`;
@@ -255,17 +257,26 @@ class MemoryService {
       if (profile.platforms?.length) context += `Platforms: ${profile.platforms.join(', ')}\n`;
     }
 
-    // Memory context
-    if (memories.length > 0) {
-      context += `\n## Known Preferences & Facts\n`;
-      const groupedMemories = {};
-      for (const mem of memories) {
-        if (!groupedMemories[mem.type]) groupedMemories[mem.type] = [];
-        groupedMemories[mem.type].push(`${mem.key}: ${mem.value}`);
-      }
-      for (const [type, items] of Object.entries(groupedMemories)) {
-        context += `\n### ${type.charAt(0).toUpperCase() + type.slice(1)}s\n`;
-        items.forEach(item => context += `- ${item}\n`);
+    // Memory context - optionally include and filter
+    if (includeMemories) {
+      const memories = await this.getMemories(userId, { minImportance: 2, limit: 30 });
+
+      // If onlyPreferences, filter to only preference/style type memories (not facts/context)
+      const filteredMemories = onlyPreferences
+        ? memories.filter(m => ['preference', 'style', 'goal'].includes(m.type))
+        : memories;
+
+      if (filteredMemories.length > 0) {
+        context += `\n## Known Preferences & Facts\n`;
+        const groupedMemories = {};
+        for (const mem of filteredMemories) {
+          if (!groupedMemories[mem.type]) groupedMemories[mem.type] = [];
+          groupedMemories[mem.type].push(`${mem.key}: ${mem.value}`);
+        }
+        for (const [type, items] of Object.entries(groupedMemories)) {
+          context += `\n### ${type.charAt(0).toUpperCase() + type.slice(1)}s\n`;
+          items.forEach(item => context += `- ${item}\n`);
+        }
       }
     }
 
