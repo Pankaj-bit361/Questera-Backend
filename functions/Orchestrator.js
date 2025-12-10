@@ -7,7 +7,7 @@ const Image = require('../models/image');
 const ImageMessage = require('../models/imageMessage');
 
 /**
- * Helper to clean JSON from markdown code blocks
+ * Helper to clean JSON from markdown code blocks and extract JSON
  */
 function cleanJsonResponse(text) {
   if (!text) return '{}';
@@ -21,7 +21,28 @@ function cleanJsonResponse(text) {
   if (cleaned.endsWith('```')) {
     cleaned = cleaned.slice(0, -3);
   }
-  return cleaned.trim();
+  cleaned = cleaned.trim();
+
+  // Try to extract JSON if it's wrapped in text
+  const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (jsonMatch) {
+    cleaned = jsonMatch[0];
+  }
+
+  return cleaned;
+}
+
+/**
+ * Helper to safely parse JSON with fallback
+ */
+function safeJsonParse(text, fallback = {}) {
+  try {
+    const cleaned = cleanJsonResponse(text);
+    return JSON.parse(cleaned);
+  } catch (error) {
+    console.warn('⚠️ JSON parse failed, using fallback:', error.message);
+    return fallback;
+  }
 }
 
 /**
@@ -181,7 +202,13 @@ Output JSON:
       });
 
       const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      return JSON.parse(cleanJsonResponse(text));
+      const parsed = safeJsonParse(text, {
+        intent: hasReferenceImages ? 'image_generation' : 'conversation',
+        confidence: 0.5,
+        message: "I'll help you with that!",
+        contentJob: { generateBrief: hasReferenceImages, type: 'single', count: 1 }
+      });
+      return parsed;
     } catch (error) {
       console.error('Error determining intent:', error);
       return {

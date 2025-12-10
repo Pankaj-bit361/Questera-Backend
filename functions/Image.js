@@ -158,6 +158,12 @@ class ImageController {
                     let imageData = image.data || image;
                     let mimeType = image.mimeType || 'image/jpeg';
 
+                    // Skip SVG images - Gemini doesn't support them
+                    if (mimeType === 'image/svg+xml' || (typeof imageData === 'string' && imageData.includes('svg'))) {
+                        console.log('⚠️ [GENERATE] Skipping SVG image - Gemini does not support SVG format');
+                        continue;
+                    }
+
                     if (typeof imageData === 'string' && imageData.startsWith('http')) {
                         console.log('🌐 [GENERATE] Fetching image from URL...');
                         const response = await fetch(imageData);
@@ -165,6 +171,12 @@ class ImageController {
                         imageData = Buffer.from(arrayBuffer).toString('base64');
                         if (imageData.includes('.png')) mimeType = 'image/png';
                         else if (imageData.includes('.webp')) mimeType = 'image/webp';
+                    }
+
+                    // Ensure mimeType is supported by Gemini
+                    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(mimeType)) {
+                        console.log('⚠️ [GENERATE] Unsupported MIME type:', mimeType, '- defaulting to image/jpeg');
+                        mimeType = 'image/jpeg';
                     }
 
                     console.log('☁️ [GENERATE] Uploading reference image to S3...');
