@@ -1,4 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
+const OpenRouterLLM = require('./OpenRouterLLM');
 
 /**
  * Helper to clean JSON from markdown code blocks and extract JSON
@@ -48,6 +49,7 @@ class ContentEngine {
       apiKey: process.env.GEMINI_API_KEY,
     });
     this.textModel = 'gemini-2.5-flash-lite-preview-09-2025';
+    this.openRouter = new OpenRouterLLM(); // Use OpenRouter for text tasks
   }
 
   /**
@@ -84,40 +86,26 @@ Output a JSON object with:
   "count": number of images to generate (1-10)
 }`;
 
-    try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: `${systemPrompt}\n\nUser Request: ${userRequest}` }] }],
-        generationConfig: {
-          temperature: 0.7,
-          responseMimeType: 'application/json',
-        },
-      });
+    const fallback = {
+      concept: userRequest,
+      mood: ['professional', 'modern'],
+      colors: ['neutral'],
+      composition: 'centered subject, clean background',
+      targetPlatform: 'instagram',
+      targetAspectRatio: '1:1',
+      styleDirection: 'photorealistic',
+      count: 1,
+    };
 
-      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      const fallback = {
-        concept: userRequest,
-        mood: ['professional', 'modern'],
-        colors: ['neutral'],
-        composition: 'centered subject, clean background',
-        targetPlatform: 'instagram',
-        targetAspectRatio: '1:1',
-        styleDirection: 'photorealistic',
-        count: 1,
-      };
-      return safeJsonParse(text, fallback);
+    try {
+      // Use OpenRouter (Kimi K2) for design brief generation
+      return await this.openRouter.generateJSON(`${systemPrompt}\n\nUser Request: ${userRequest}`, {
+        temperature: 0.7,
+        fallback
+      });
     } catch (error) {
       console.error('Error generating design brief:', error);
-      return {
-        concept: userRequest,
-        mood: ['professional', 'modern'],
-        colors: ['neutral'],
-        composition: 'centered subject, clean background',
-        targetPlatform: 'instagram',
-        targetAspectRatio: '1:1',
-        styleDirection: 'photorealistic',
-        count: 1,
-      };
+      return fallback;
     }
   }
 
@@ -158,17 +146,13 @@ Output a JSON array of prompt strings:
 ["prompt1", "prompt2", "prompt3", ...]`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-        generationConfig: {
-          temperature: 0.8,
-          responseMimeType: 'application/json',
-        },
+      // Use OpenRouter (Kimi K2) for prompt generation
+      const result = await this.openRouter.generateJSON(systemPrompt, {
+        temperature: 0.8,
+        fallback: [designBrief.concept || 'A professional photograph']
       });
-
-      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-      return JSON.parse(cleanJsonResponse(text));
+      // Handle both array and object responses
+      return Array.isArray(result) ? result : [designBrief.concept || 'A professional photograph'];
     } catch (error) {
       console.error('Error generating prompts:', error);
       return [designBrief.concept || 'A professional photograph'];
@@ -232,17 +216,11 @@ OUTPUT FORMAT (JSON):
 }`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-        generationConfig: {
-          temperature: 0.8,
-          responseMimeType: 'application/json',
-        },
+      // Use OpenRouter (Kimi K2) for viral content generation
+      return await this.openRouter.generateJSON(systemPrompt, {
+        temperature: 0.8,
+        fallback: this.getFallbackViralContent(designBrief)
       });
-
-      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      return JSON.parse(cleanJsonResponse(text));
     } catch (error) {
       console.error('Error generating viral content:', error);
       return this.getFallbackViralContent(designBrief);
@@ -320,13 +298,8 @@ Simple prompt: "${simplePrompt}"
 Output only the enhanced prompt text, nothing else.`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-        generationConfig: { temperature: 0.6 },
-      });
-
-      return response.candidates?.[0]?.content?.parts?.[0]?.text || simplePrompt;
+      // Use OpenRouter (Kimi K2) for prompt enhancement
+      return await this.openRouter.generateText(systemPrompt, { temperature: 0.6 });
     } catch (error) {
       console.error('Error enhancing prompt:', error);
       return simplePrompt;
@@ -352,13 +325,8 @@ IMPORTANT:
 Output only the edit prompt text, nothing else. Start with "Edit the image to..." or "Modify the image by..."`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-        generationConfig: { temperature: 0.5 },
-      });
-
-      return response.candidates?.[0]?.content?.parts?.[0]?.text || `Edit the image: ${editDescription}`;
+      // Use OpenRouter (Kimi K2) for edit prompt generation
+      return await this.openRouter.generateText(systemPrompt, { temperature: 0.5 });
     } catch (error) {
       console.error('Error generating edit prompt:', error);
       return `Edit the image: ${editDescription}`;
@@ -391,17 +359,11 @@ Output JSON with memories to save:
 Only include fields that are clearly mentioned. Return empty arrays/objects if nothing found.`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.textModel,
-        contents: [{ role: 'user', parts: [{ text: systemPrompt }] }],
-        generationConfig: {
-          temperature: 0.3,
-          responseMimeType: 'application/json',
-        },
+      // Use OpenRouter (Kimi K2) for memory extraction
+      return await this.openRouter.generateJSON(systemPrompt, {
+        temperature: 0.3,
+        fallback: { memories: [], profileUpdates: {} }
       });
-
-      const text = response.candidates?.[0]?.content?.parts?.[0]?.text || '{}';
-      return JSON.parse(cleanJsonResponse(text));
     } catch (error) {
       console.error('Error extracting memories:', error);
       return { memories: [], profileUpdates: {} };

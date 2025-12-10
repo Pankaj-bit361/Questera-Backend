@@ -21,7 +21,7 @@ class AuthController {
         return jwt.sign(
             { id: user._id, userId: user.userId, email: user.email },
             this.jwtSecret,
-            { expiresIn: '7d' }
+            { expiresIn: '30d' } // Token expires in 1 month
         );
     }
 
