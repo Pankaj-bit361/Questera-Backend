@@ -56,14 +56,17 @@ class ContentEngine {
   async generateDesignBrief(userRequest, context = {}) {
     const { profile, memories, referenceType } = context;
 
-    const systemPrompt = `You are a creative director for AI-generated content. 
+    const systemPrompt = `You are a creative director for AI-generated content.
 Given a user request, create a detailed design brief for image generation.
+
+IMPORTANT: Extract the brand name if mentioned by the user. The brand name is crucial for content creation.
 
 ${context.profileContext || ''}
 
 Output a JSON object with:
 {
   "concept": "Main creative concept in one sentence",
+  "brandName": "The brand name mentioned by user (or null if not mentioned)",
   "mood": ["mood1", "mood2", "mood3"],
   "colors": ["primary color", "secondary color", "accent"],
   "composition": "Description of image composition and framing",
@@ -71,6 +74,7 @@ Output a JSON object with:
   "targetAspectRatio": "1:1|4:5|9:16|16:9",
   "styleDirection": "photorealistic|cinematic|artistic|editorial|lifestyle",
   "referenceNotes": "How to incorporate reference images if any",
+  "productTypes": ["list of product types mentioned like jeans, t-shirt, shirt, etc."],
   "count": number of images to generate (1-10)
 }`;
 
@@ -164,15 +168,29 @@ Output a JSON array of prompt strings:
   async generateViralPostContent(designBrief, imageDescriptions = [], context = {}) {
     const { platform = 'instagram', tone = 'engaging', niche = '', goals = [] } = context;
 
+    // Extract brand name from design brief
+    const brandName = designBrief?.brandName || '';
+    const productTypes = designBrief?.productTypes || [];
+    const concept = designBrief?.concept || '';
+
     const systemPrompt = `You are an elite social media growth strategist who has helped creators go viral.
 Your job is to create MAXIMUM ENGAGEMENT content that drives likes, comments, shares, and follows.
 
 CONTENT CONTEXT:
-- Design Brief: ${JSON.stringify(designBrief, null, 2)}
+- Concept: ${concept}
+- Brand Name: ${brandName || 'Not specified'} ${brandName ? '(MUST prominently feature this brand in title and description!)' : ''}
+- Product Types: ${productTypes.length > 0 ? productTypes.join(', ') : 'general fashion'}
 - Platform: ${platform}
-- Niche: ${niche || 'lifestyle'}
+- Niche: ${niche || 'fashion/lifestyle'}
 - Creator Goals: ${goals.join(', ') || 'grow audience, increase engagement'}
 - Tone: ${tone}
+
+${brandName ? `BRAND INTEGRATION RULES:
+- The brand name "${brandName}" MUST appear in the title
+- The brand name "${brandName}" MUST appear prominently in the description (first 2 lines)
+- Create branded hashtag: #${brandName.replace(/\s+/g, '')}
+- Make the content feel like official brand content
+` : ''}
 
 VIRALITY PRINCIPLES TO APPLY:
 1. HOOK: First line must stop the scroll (curiosity, controversy, or emotion)
@@ -183,16 +201,16 @@ VIRALITY PRINCIPLES TO APPLY:
 
 OUTPUT FORMAT (JSON):
 {
-  "title": "Attention-grabbing title for the post (under 60 chars)",
+  "title": "Attention-grabbing title ${brandName ? `featuring "${brandName}" brand` : ''} (under 60 chars)",
   "hook": "Scroll-stopping first line that creates curiosity",
-  "description": "Full post description with emojis, line breaks, and storytelling (300-500 chars)",
-  "shortCaption": "Punchy one-liner version (under 100 chars)",
+  "description": "Full post description with emojis, line breaks, and storytelling. ${brandName ? `MUST mention "${brandName}" in first 2 lines.` : ''} (300-500 chars)",
+  "shortCaption": "Punchy one-liner ${brandName ? `with "${brandName}"` : ''} (under 100 chars)",
   "callToAction": "Engagement-driving question or challenge",
   "hashtags": {
     "primary": ["5 high-volume trending hashtags"],
     "secondary": ["5 medium-volume relevant hashtags"],
     "niche": ["5 niche-specific hashtags"],
-    "branded": ["2-3 unique branded hashtags"]
+    "branded": ["2-3 unique branded hashtags ${brandName ? `including #${brandName.replace(/\s+/g, '')}` : ''}"]
   },
   "hashtagString": "#tag1 #tag2 ... (all hashtags formatted for copy-paste)",
   "bestPostingTimes": ["suggested posting times for max reach"],
@@ -222,21 +240,41 @@ OUTPUT FORMAT (JSON):
    * Fallback viral content if AI fails
    */
   getFallbackViralContent(designBrief) {
+    const brandName = designBrief?.brandName || '';
+    const productTypes = designBrief?.productTypes || [];
+    const concept = designBrief?.concept || 'Amazing content';
+
+    // Create brand-aware fallback content
+    const brandTag = brandName ? brandName.replace(/\s+/g, '') : 'brand';
+    const productsText = productTypes.length > 0 ? productTypes.join(', ') : 'collection';
+
+    const title = brandName
+      ? `${brandName} - New ${productsText} Drop! 🔥`
+      : `Check this out! ✨`;
+
+    const description = brandName
+      ? `${brandName} presents the latest ${productsText}! ✨\n\n${concept}\n\nDouble tap if you love it! 👇`
+      : `${concept} ✨\n\nDouble tap if you agree! 👇`;
+
+    const brandedTags = brandName
+      ? [brandTag.toLowerCase(), `${brandTag}style`.toLowerCase(), 'brandnew']
+      : ['questera', 'aigenerated'];
+
     return {
-      title: designBrief?.concept || 'Check this out! ✨',
-      hook: 'You won\'t believe what happened next...',
-      description: `${designBrief?.concept || 'Amazing content'} ✨\n\nDouble tap if you agree! 👇`,
-      shortCaption: designBrief?.concept || 'New post alert! 🔥',
-      callToAction: 'What do you think? Comment below! 👇',
+      title,
+      hook: brandName ? `${brandName} just dropped something amazing...` : 'You won\'t believe what happened next...',
+      description,
+      shortCaption: brandName ? `${brandName} ${productsText} 🔥` : 'New post alert! 🔥',
+      callToAction: brandName ? `Would you wear ${brandName}? Comment below! 👇` : 'What do you think? Comment below! 👇',
       hashtags: {
         primary: ['viral', 'trending', 'explore', 'foryou', 'instagood'],
-        secondary: ['content', 'creator', 'lifestyle', 'daily', 'mood'],
-        niche: ['aiart', 'digitalcreator', 'contentcreator'],
-        branded: ['questera', 'aigenerated']
+        secondary: ['fashion', 'style', 'ootd', 'clothing', 'outfitoftheday'],
+        niche: ['fashionbrand', 'newcollection', 'streetwear'],
+        branded: brandedTags
       },
-      hashtagString: '#viral #trending #explore #foryou #instagood #content #creator #aiart #questera',
+      hashtagString: `#viral #trending #explore #fashion #style ${brandName ? `#${brandTag.toLowerCase()}` : '#questera'} #ootd #newcollection`,
       bestPostingTimes: ['9:00 AM', '12:00 PM', '7:00 PM'],
-      viralScore: 5,
+      viralScore: 6,
       viralTips: ['Post during peak hours', 'Engage with comments quickly', 'Use trending audio']
     };
   }
