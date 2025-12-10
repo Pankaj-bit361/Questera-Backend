@@ -302,8 +302,8 @@ class CreditsController {
           success: true,
           subscriptionId: subscription.id,
           razorpayKeyId: process.env.RAZORPAY_KEY_ID,
-          amount: planConfig.price * 100, // In paise
-          currency: 'INR',
+          amount: planConfig.price * 100, // In cents
+          currency: 'USD',
           name: planConfig.name,
           description: `${planConfig.name} - ${planConfig.credits} credits/month`,
         },
