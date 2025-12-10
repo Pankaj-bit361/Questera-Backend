@@ -86,8 +86,8 @@ viralRouter.post('/package', async (req, res) => {
       return res.status(400).json({ error: 'userId, ideaIndex, and viralIdeas are required' });
     }
 
-    const package = await viralService.createViralPackage(userId, ideaIndex, viralIdeas);
-    return res.status(200).json({ success: true, ...package });
+    const viralPackage = await viralService.createViralPackage(userId, ideaIndex, viralIdeas);
+    return res.status(200).json({ success: true, ...viralPackage });
   } catch (error) {
     console.error('[VIRAL] Package Creation Error:', error);
     return res.status(500).json({ error: error.message });
