@@ -59,13 +59,19 @@ class ContentEngine {
     const systemPrompt = `You are a creative director for AI-generated content.
 Given a user request, create a detailed design brief for image generation.
 
-IMPORTANT: Extract the brand name if mentioned by the user. The brand name is crucial for content creation.
+CRITICAL RULES:
+1. ONLY use details EXPLICITLY mentioned in the current user request
+2. Do NOT add themes, characters, or styles from previous requests
+3. Extract the brand name if mentioned by the user - the brand name is crucial
+4. If user says "white tshirt", create ONLY a white tshirt - do NOT add unrelated themes
+5. Each request should be treated as a fresh, independent creation
 
-${context.profileContext || ''}
+BACKGROUND CONTEXT (use ONLY for understanding user's style preferences, NOT for adding content):
+${context.profileContext || 'No previous context'}
 
 Output a JSON object with:
 {
-  "concept": "Main creative concept in one sentence",
+  "concept": "Main creative concept based ONLY on current user request",
   "brandName": "The brand name mentioned by user (or null if not mentioned)",
   "mood": ["mood1", "mood2", "mood3"],
   "colors": ["primary color", "secondary color", "accent"],
@@ -129,17 +135,24 @@ Output a JSON object with:
     const systemPrompt = `You are an expert prompt engineer for AI image generation.
 Given a design brief, create ${count} unique, detailed image generation prompts.
 
+CRITICAL RULES:
+- ONLY include elements explicitly described in the design brief
+- Do NOT add characters, themes, or elements not mentioned in the brief
+- If the brief says "white t-shirt with Velos logo", create ONLY that - no superheroes, no unrelated themes
+- Focus on the SPECIFIC product/concept in the brief
+
 ${referenceInstruction}
 
 Design Brief:
 ${JSON.stringify(designBrief, null, 2)}
 
 Create prompts that:
-1. Are highly detailed and specific
+1. Are highly detailed and specific to ONLY what's in the design brief
 2. Include lighting, mood, and composition details
 3. Vary in style/setting while maintaining brand consistency
 4. Are optimized for ${designBrief.targetAspectRatio || '1:1'} aspect ratio
 5. Follow ${designBrief.styleDirection || 'photorealistic'} style
+6. Do NOT add any characters, themes, or styles not explicitly requested
 
 Output a JSON array of prompt strings:
 ["prompt1", "prompt2", "prompt3", ...]`;
