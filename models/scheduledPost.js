@@ -17,6 +17,9 @@ const scheduledPostSchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  imageUrls: [{
+    type: String, // For carousel posts
+  }],
   caption: {
     type: String,
     default: '',
@@ -24,6 +27,16 @@ const scheduledPostSchema = new mongoose.Schema({
   hashtags: {
     type: String,
     default: '',
+  },
+  postType: {
+    type: String,
+    enum: ['image', 'carousel', 'video', 'reel', 'story'],
+    default: 'image',
+  },
+  // Campaign reference
+  campaignId: {
+    type: String,
+    index: true,
   },
   // Platform & Account
   platform: {
@@ -94,6 +107,20 @@ const scheduledPostSchema = new mongoose.Schema({
   imageChatId: {
     type: String,
   },
+  // Engagement tracking (updated after posting)
+  engagement: {
+    likes: { type: Number, default: 0 },
+    comments: { type: Number, default: 0 },
+    shares: { type: Number, default: 0 },
+    saves: { type: Number, default: 0 },
+    reach: { type: Number, default: 0 },
+    impressions: { type: Number, default: 0 },
+    lastUpdated: Date,
+  },
+  // Platform URL after posting
+  platformPostUrl: {
+    type: String,
+  },
 }, { timestamps: true });
 
 // Indexes for efficient queries
@@ -101,7 +128,7 @@ scheduledPostSchema.index({ userId: 1, status: 1, scheduledAt: 1 });
 scheduledPostSchema.index({ status: 1, scheduledAt: 1 }); // For cron job to find due posts
 
 // Virtual for full caption (caption + hashtags)
-scheduledPostSchema.virtual('fullCaption').get(function() {
+scheduledPostSchema.virtual('fullCaption').get(function () {
   const parts = [];
   if (this.caption) parts.push(this.caption);
   if (this.hashtags) parts.push(this.hashtags);
@@ -109,7 +136,7 @@ scheduledPostSchema.virtual('fullCaption').get(function() {
 });
 
 // Static method to find posts due for publishing
-scheduledPostSchema.statics.findDuePosts = function() {
+scheduledPostSchema.statics.findDuePosts = function () {
   return this.find({
     status: 'scheduled',
     scheduledAt: { $lte: new Date() },
@@ -118,7 +145,7 @@ scheduledPostSchema.statics.findDuePosts = function() {
 };
 
 // Static method to get posts for calendar view
-scheduledPostSchema.statics.getCalendarPosts = function(userId, startDate, endDate) {
+scheduledPostSchema.statics.getCalendarPosts = function (userId, startDate, endDate) {
   return this.find({
     userId,
     scheduledAt: { $gte: startDate, $lte: endDate },

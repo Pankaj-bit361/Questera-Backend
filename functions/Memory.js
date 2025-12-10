@@ -101,7 +101,15 @@ class MemoryService {
    * Add or update a memory
    */
   async addMemory(userId, memoryData) {
-    const { type, key, value, importance = 3, profileId, source = 'chat' } = memoryData;
+    const { type, key, importance = 3, profileId, source = 'chat' } = memoryData;
+
+    // Ensure value is always a string (AI sometimes returns arrays)
+    let value = memoryData.value;
+    if (Array.isArray(value)) {
+      value = value.join(', ');
+    } else if (typeof value !== 'string') {
+      value = String(value);
+    }
 
     // Check if similar memory exists
     let memory = await Memory.findOne({ userId, type, key });

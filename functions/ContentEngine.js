@@ -26,7 +26,7 @@ class ContentEngine {
     this.ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
-    this.textModel = 'gemini-2.5-flash';
+    this.textModel = 'gemini-2.5-flash-lite-preview-09-2025';
   }
 
   /**

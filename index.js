@@ -9,9 +9,14 @@ const instagramRouter = require('./routes/Instagram');
 const chatRouter = require('./routes/Chat');
 const creditsRouter = require('./routes/Credits');
 const schedulerRouter = require('./routes/Scheduler');
+const campaignRouter = require('./routes/Campaign');
+const liveGenRouter = require('./routes/LiveGeneration');
+const analyticsRouter = require('./routes/Analytics');
+const viralRouter = require('./routes/ViralContent');
 const authMiddleware = require('./middlewares/auth');
 const connectDB = require('./db');
 const SchedulerController = require('./functions/Scheduler');
+const LiveGenerationService = require('./functions/LiveGenerationService');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -42,6 +47,10 @@ app.use('/api/instagram', instagramRouter);
 app.use('/api/chat', chatRouter); // Smart AI Chat & Image Generation
 app.use('/api/credits', creditsRouter); // Credits & Subscription Management
 app.use('/api/scheduler', schedulerRouter); // Post Scheduling
+app.use('/api/campaigns', campaignRouter); // Campaign Automation
+app.use('/api/live-generation', liveGenRouter); // Live Generation + Auto-Post
+app.use('/api/analytics', analyticsRouter); // Analytics Dashboard
+app.use('/api/viral', viralRouter); // Viral Content Extraction
 
 // Database connection and Server Start
 const startServer = async () => {
@@ -64,18 +73,27 @@ const startServer = async () => {
 // Scheduler Cron Job - checks and publishes due posts every minute
 const startSchedulerCron = () => {
     const scheduler = new SchedulerController();
+    const liveGenService = new LiveGenerationService();
     const CRON_INTERVAL = 60 * 1000; // 1 minute
 
     console.log('📅 [CRON] Scheduler cron job started - checking every minute');
+    console.log('🔄 [CRON] Live generation cron job started - checking every minute');
 
     setInterval(async () => {
         try {
-            const result = await scheduler.processDuePosts();
-            if (result.processed > 0) {
-                console.log(`📅 [CRON] Processed ${result.processed} scheduled posts`);
+            // Process scheduled posts
+            const schedulerResult = await scheduler.processDuePosts();
+            if (schedulerResult.processed > 0) {
+                console.log(`📅 [CRON] Processed ${schedulerResult.processed} scheduled posts`);
+            }
+
+            // Process live generation jobs
+            const liveGenResult = await liveGenService.processDueJobs();
+            if (liveGenResult.processed > 0) {
+                console.log(`🔄 [CRON] Processed ${liveGenResult.processed} live generation jobs`);
             }
         } catch (error) {
-            console.error('❌ [CRON] Scheduler error:', error);
+            console.error('❌ [CRON] Cron error:', error);
         }
     }, CRON_INTERVAL);
 };

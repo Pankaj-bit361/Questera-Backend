@@ -33,7 +33,7 @@ class OrchestratorService {
     this.ai = new GoogleGenAI({
       apiKey: process.env.GEMINI_API_KEY,
     });
-    this.textModel = 'gemini-2.5-flash';
+    this.textModel = 'gemini-2.5-flash-lite-preview-09-2025';
     this.memoryService = new MemoryService();
     this.contentEngine = new ContentEngine();
   }
@@ -80,6 +80,22 @@ class OrchestratorService {
         case 'campaign':
           result = await this.handleImageGeneration(userId, message, intent, profile, referenceImages, imageChatId);
           break;
+        case 'scheduled_campaign':
+          // User wants to create images AND schedule them for auto-posting
+          result = await this.handleScheduledCampaign(userId, message, intent, profile, referenceImages, imageChatId);
+          break;
+        case 'live_generation':
+          // User wants continuous/recurring generation + auto-post
+          result = await this.handleLiveGeneration(userId, message, intent, profile, referenceImages);
+          break;
+        case 'viral_content':
+          // User wants viral content ideas, competitor analysis, trending content
+          result = await this.handleViralContent(userId, message, intent, profile);
+          break;
+        case 'schedule':
+          // User wants to schedule an existing image
+          result = await this.handleSchedulePost(userId, message, intent, imageChatId, lastImageUrl);
+          break;
         case 'edit':
         case 'remix':
           // For edit/remix, we need to use the previous image as reference
@@ -114,27 +130,43 @@ Has reference images attached: ${hasReferenceImages}
 Intents:
 - "image_generation": User wants to create a NEW image from scratch
 - "campaign": User wants multiple NEW images for a campaign/batch
+- "scheduled_campaign": User wants to generate images upfront AND schedule them for auto-posting
+- "live_generation": User wants CONTINUOUS/RECURRING generation - create NEW images at intervals and post them automatically
+- "viral_content": User wants to find viral/trending content, analyze competitors, get content inspiration, or create viral-optimized content
 - "edit": User wants to MODIFY/EDIT an existing image (change colors, add/remove elements, adjust style)
 - "remix": User wants to create a variation/remix of an existing image
+- "schedule": User wants to schedule an existing image for posting
 - "question": User is asking a question
 - "conversation": General chat or feedback
 
-IMPORTANT: If user mentions changing, editing, modifying, swapping, replacing, or adjusting something in a PREVIOUS image (like "change the jacket", "make it blue", "add sunglasses", "remove the background"), this is an "edit" intent.
+IMPORTANT:
+- If user mentions "viral", "trending", "competitors", "what's working", "inspiration", "analyze @username", this is "viral_content".
+- If user mentions changing/editing a PREVIOUS image, this is an "edit" intent.
+- If user wants to generate images ONCE and schedule them, this is "scheduled_campaign".
+- If user wants CONTINUOUS/RECURRING generation (new images created at each interval), this is "live_generation".
+- If user just wants to schedule an already generated image, this is "schedule".
 
 Message: "${message}"
 
 Output JSON:
 {
-  "intent": "image_generation|campaign|edit|remix|question|conversation",
+  "intent": "image_generation|campaign|scheduled_campaign|live_generation|viral_content|edit|remix|schedule|question|conversation",
   "confidence": 0.0-1.0,
   "message": "Brief friendly response acknowledging the request",
   "needsPreviousImage": true/false (true if editing requires the previous generated image),
   "editDescription": "What change is being requested (only for edit intent)",
   "contentJob": {
     "generateBrief": true/false,
-    "type": "single|campaign|batch",
+    "type": "single|campaign|batch|scheduled",
     "count": number of images (1-10),
     "style": "suggested style if mentioned"
+  },
+  "scheduling": {
+    "detected": true/false,
+    "interval": "hourly|daily|weekly|custom",
+    "intervalMinutes": number (e.g., 60 for hourly),
+    "startTime": "ISO date string if mentioned",
+    "platform": "instagram|tiktok|linkedin"
   }
 }`;
 
@@ -377,6 +409,277 @@ Keep responses concise and friendly.`;
 
     await job.save();
     return { status: 200, json: job };
+  }
+
+  /**
+   * Handle scheduled campaign - create images AND schedule for auto-posting
+   */
+  async handleScheduledCampaign(userId, message, intent, profile, referenceImages, existingChatId) {
+    console.log('📅 [ORCHESTRATOR] Handling scheduled campaign request');
+
+    const CampaignOrchestrator = require('./CampaignOrchestrator');
+    const SocialAccount = require('../models/socialAccount');
+    const Instagram = require('../models/instagram');
+    const campaignOrchestrator = new CampaignOrchestrator();
+
+    // Get user's connected Instagram account
+    let socialAccount = await SocialAccount.findOne({ userId, platform: 'instagram', isActive: true });
+
+    // Fallback to legacy Instagram model if no SocialAccount
+    if (!socialAccount) {
+      const instagram = await Instagram.findOne({ userId, isConnected: true });
+      if (instagram) {
+        // Create a SocialAccount from legacy data
+        socialAccount = await SocialAccount.create({
+          userId,
+          platform: 'instagram',
+          platformAccountId: instagram.instagramBusinessAccountId,
+          username: instagram.instagramUsername,
+          displayName: instagram.instagramName,
+          profilePictureUrl: instagram.profilePictureUrl,
+          accessToken: instagram.accessToken,
+          isActive: true,
+        });
+      }
+    }
+
+    if (!socialAccount) {
+      return {
+        type: 'message',
+        message: "I'd love to help you schedule posts, but you haven't connected your Instagram account yet! Please connect your Instagram first, then we can set up automatic posting.",
+        action: 'connect_instagram',
+      };
+    }
+
+    // Parse scheduling info from intent
+    const scheduling = intent.scheduling || {};
+    const intervalMinutes = scheduling.intervalMinutes || 60;
+    const count = intent.contentJob?.count || 3;
+
+    // Create campaign
+    const campaignResult = await campaignOrchestrator.createAutomatedCampaign({
+      userId,
+      name: `Auto Campaign - ${new Date().toLocaleDateString()}`,
+      description: message,
+      socialAccountId: socialAccount.accountId,
+      productImages: referenceImages.map(img => ({ data: img.data, mimeType: img.mimeType })),
+      modelTypes: ['female'], // Default, can be enhanced
+      postsPerModel: count,
+      schedule: {
+        startDate: scheduling.startTime || new Date(),
+        intervalMinutes,
+        timezone: profile.timezone || 'UTC',
+      },
+      viralSettings: {
+        tone: profile.brandVoice || 'engaging',
+        niche: profile.niche || '',
+      },
+      userRequest: message,
+    });
+
+    // Store campaign reference in chat
+    if (existingChatId) {
+      const imageChat = await Image.findOne({ imageChatId: existingChatId });
+      if (imageChat) {
+        imageChat.campaignId = campaignResult.campaign.campaignId;
+        await imageChat.save();
+      }
+    }
+
+    return {
+      type: 'campaign_created',
+      message: intent.message || `Great! I'm creating a campaign with ${count} images that will be posted every ${intervalMinutes} minutes to your Instagram (@${socialAccount.username}). I'll start generating the images now!`,
+      campaign: campaignResult.campaign,
+      nextStep: 'Generating images... This may take a few minutes.',
+    };
+  }
+
+  /**
+   * Handle scheduling an existing image for posting
+   */
+  async handleSchedulePost(userId, message, intent, existingChatId, lastImageUrl) {
+    console.log('📅 [ORCHESTRATOR] Handling schedule post request');
+
+    const SchedulerController = require('./Scheduler');
+    const Instagram = require('../models/instagram');
+    const schedulerController = new SchedulerController();
+
+    if (!lastImageUrl) {
+      return {
+        type: 'message',
+        message: "I don't see an image to schedule. Please generate or upload an image first, then ask me to schedule it!",
+      };
+    }
+
+    // Get user's Instagram account
+    const instagram = await Instagram.findOne({ userId, isConnected: true });
+    if (!instagram) {
+      return {
+        type: 'message',
+        message: "You haven't connected your Instagram account yet. Please connect it first to schedule posts!",
+        action: 'connect_instagram',
+      };
+    }
+
+    // Parse scheduling time from intent
+    const scheduling = intent.scheduling || {};
+    let scheduledAt = new Date();
+
+    if (scheduling.startTime) {
+      scheduledAt = new Date(scheduling.startTime);
+    } else {
+      // Default to 1 hour from now
+      scheduledAt.setHours(scheduledAt.getHours() + 1);
+    }
+
+    // Create scheduled post
+    const result = await schedulerController.createScheduledPost({
+      body: {
+        userId,
+        imageUrl: lastImageUrl,
+        caption: '', // Will be generated
+        hashtags: '',
+        platform: 'instagram',
+        accountId: instagram.instagramBusinessAccountId,
+        scheduledAt: scheduledAt.toISOString(),
+        imageChatId: existingChatId,
+      },
+    });
+
+    if (result.status === 200) {
+      return {
+        type: 'scheduled',
+        message: `Done! I've scheduled your image to be posted on ${scheduledAt.toLocaleString()}. You can view and manage your scheduled posts in the calendar.`,
+        post: result.json.post,
+      };
+    } else {
+      return {
+        type: 'error',
+        message: `Sorry, I couldn't schedule the post: ${result.json.error}`,
+      };
+    }
+  }
+
+  /**
+   * Handle live generation - continuous/recurring generation + auto-post
+   * Creates new images at scheduled intervals
+   */
+  async handleLiveGeneration(userId, message, intent, profile, referenceImages) {
+    console.log('🔄 [ORCHESTRATOR] Handling live generation request');
+
+    const LiveGenerationService = require('./LiveGenerationService');
+    const Instagram = require('../models/instagram');
+    const liveGenService = new LiveGenerationService();
+
+    // Get user's connected Instagram account
+    const instagram = await Instagram.findOne({ userId, isConnected: true });
+    if (!instagram) {
+      return {
+        type: 'message',
+        message: "I'd love to help you set up continuous content generation, but you haven't connected your Instagram account yet! Please connect your Instagram first.",
+        action: 'connect_instagram',
+      };
+    }
+
+    // Parse scheduling info from intent
+    const scheduling = intent.scheduling || {};
+    const intervalMinutes = scheduling.intervalMinutes || 60;
+
+    // Create live generation job
+    const job = await liveGenService.createJob(userId, {
+      name: `Live Content - ${new Date().toLocaleDateString()}`,
+      description: message,
+      basePrompt: message, // Use user's message as base prompt
+      socialAccountId: instagram.instagramBusinessAccountId,
+      platform: 'instagram',
+      intervalMinutes,
+      themes: ['lifestyle', 'professional', 'casual', 'glamour'],
+      styles: ['photorealistic', 'cinematic', 'fashion editorial'],
+      modelTypes: ['female'],
+      maxPosts: 100,
+      autoPost: true,
+      referenceImages: referenceImages.map(img => ({
+        url: img.url || '',
+        type: 'product',
+      })),
+    });
+
+    const intervalText = intervalMinutes < 60
+      ? `${intervalMinutes} minutes`
+      : intervalMinutes === 60
+        ? 'hour'
+        : `${Math.round(intervalMinutes / 60)} hours`;
+
+    return {
+      type: 'live_generation_started',
+      message: intent.message || `I've set up continuous content generation for you! Every ${intervalText}, I'll create a fresh new image and post it automatically to your Instagram (@${instagram.instagramUsername}). The first post will go out at ${job.schedule.nextRunAt.toLocaleString()}. You can pause or stop this anytime!`,
+      job: {
+        jobId: job.jobId,
+        name: job.name,
+        intervalMinutes: job.schedule.intervalMinutes,
+        nextRunAt: job.schedule.nextRunAt,
+        maxPosts: job.limits.maxPosts,
+      },
+      actions: ['pause', 'stop', 'view_status'],
+    };
+  }
+
+  /**
+   * Handle viral content requests - trending content, competitor analysis, viral ideas
+   */
+  async handleViralContent(userId, message, intent, profile) {
+    console.log('🔥 [ORCHESTRATOR] Handling viral content request');
+
+    const ViralContentService = require('./ViralContentService');
+    const viralService = new ViralContentService();
+
+    // Detect what type of viral content request this is
+    const lowerMessage = message.toLowerCase();
+
+    // Check for competitor analysis (@username)
+    const competitorMatch = message.match(/@(\w+)/);
+    if (competitorMatch) {
+      const handle = competitorMatch[1];
+      const analysis = await viralService.analyzeCompetitor(handle, 'instagram');
+
+      return {
+        type: 'competitor_analysis',
+        message: intent.message || `Here's my analysis of @${handle}'s content strategy! I've identified their content pillars, visual style, posting patterns, and generated some content ideas inspired by their success.`,
+        analysis,
+        actions: ['generate_similar', 'save_insights'],
+      };
+    }
+
+    // Check for trending/viral content request
+    if (lowerMessage.includes('trend') || lowerMessage.includes('viral') || lowerMessage.includes('what\'s working')) {
+      const niche = profile?.industry || 'fashion';
+      const trends = await viralService.findTrendingContent(niche, 'instagram', 5);
+
+      return {
+        type: 'trending_content',
+        message: intent.message || `Here are the top trending content ideas in ${niche} right now! Each includes why it's going viral and how you can create similar content.`,
+        trends: trends.trends,
+        actions: ['generate_from_trend', 'save_trends'],
+      };
+    }
+
+    // Default: Generate viral ideas based on profile
+    const niche = profile?.industry || 'general';
+    const ideas = await viralService.generateViralIdeas(userId, {
+      niche,
+      platform: 'instagram',
+      brandDescription: profile?.brandDescription || '',
+      targetAudience: profile?.targetAudience || '',
+      count: 5,
+    });
+
+    return {
+      type: 'viral_ideas',
+      message: intent.message || `I've generated 5 viral content ideas tailored to your brand! Each one is designed to maximize engagement and shares. Want me to create any of these?`,
+      ideas: ideas.ideas,
+      trends: ideas.trends,
+      actions: ['create_content', 'schedule_all', 'save_ideas'],
+    };
   }
 }
 
