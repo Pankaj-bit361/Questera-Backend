@@ -82,8 +82,10 @@ class OrchestratorService {
 
       // Step 2: Determine intent using LLM
       const hasImages = referenceImages.length > 0 || !!lastImageUrl;
+      console.log('📸 [ORCHESTRATOR] Has images:', hasImages, '| Ref images:', referenceImages.length, '| Last image URL:', lastImageUrl ? 'Present' : 'Missing');
       const intent = await this.determineIntent(message, contextString, hasImages);
-      console.log('🎯 [ORCHESTRATOR] Detected intent:', intent.intent);
+      console.log('🎯 [ORCHESTRATOR] Detected intent:', intent.intent, '| Confidence:', intent.confidence);
+      console.log('🎯 [ORCHESTRATOR] Intent details:', JSON.stringify({ editDescription: intent.editDescription, contentJob: intent.contentJob }));
 
       // Step 3: Extract and save any memories from the message (chat-specific)
       const insights = await this.contentEngine.extractMemoriesFromMessage(message, contextString);
@@ -163,12 +165,24 @@ Intents:
 - "question": User is asking a question
 - "conversation": General chat or feedback
 
-IMPORTANT:
-- If user mentions "viral", "trending", "competitors", "what's working", "inspiration", "analyze @username", this is "viral_content".
-- If user mentions changing/editing a PREVIOUS image, this is an "edit" intent.
-- If user wants to generate images ONCE and schedule them, this is "scheduled_campaign".
-- If user wants CONTINUOUS/RECURRING generation (new images created at each interval), this is "live_generation".
-- If user just wants to schedule an already generated image, this is "schedule".
+IMPORTANT - INTENT DETECTION RULES:
+1. EDIT INTENT - Use "edit" if user mentions ANY of these:
+   - "change", "modify", "edit", "update", "alter", "adjust"
+   - "make it", "turn it", "convert it", "add", "remove"
+   - "different color", "change color", "change background"
+   - "more", "less", "bigger", "smaller", "brighter", "darker"
+   - "same but", "like this but", "similar but"
+   - References to a previous image and wants to change it
+
+2. VIRAL_CONTENT - Use if user mentions "viral", "trending", "competitors", "what's working", "inspiration", "analyze @username"
+
+3. SCHEDULED_CAMPAIGN - Use if user wants to generate images ONCE and schedule them for auto-posting
+
+4. LIVE_GENERATION - Use if user wants CONTINUOUS/RECURRING generation (new images created at each interval)
+
+5. SCHEDULE - Use if user just wants to schedule an already generated image (no new generation)
+
+6. IMAGE_GENERATION - Use for NEW images from scratch ONLY if NOT editing an existing one
 
 Message: "${message}"
 
