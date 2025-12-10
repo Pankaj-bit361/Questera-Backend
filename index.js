@@ -26,8 +26,8 @@ app.use(express.json({ limit: '50mb' })); // Increase limit for image uploads
 
 // Increase timeout for long-running requests (image generation can take 60+ seconds)
 app.use((req, res, next) => {
-    req.setTimeout(300000); // 5 minutes
-    res.setTimeout(300000); // 5 minutes
+    req.setTimeout(480000); // 8 minutes
+    res.setTimeout(480000); // 8 minutes
     next();
 });
 
