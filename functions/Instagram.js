@@ -1,0 +1,592 @@
+const Instagram = require('../models/instagram');
+
+class InstagramController {
+  constructor() {
+    this.appId = process.env.INSTAGRAM_APP_ID;
+    this.appSecret = process.env.INSTAGRAM_APP_SECRET;
+    this.redirectUri = process.env.INSTAGRAM_REDIRECT_URI;
+    this.apiVersion = 'v20.0';
+  }
+
+  /**
+   * Get OAuth URL for user to connect Instagram
+   * Using Facebook OAuth dialog with Instagram permissions
+   */
+  getOAuthUrl(req, res) {
+    try {
+      const state = Math.random().toString(36).substring(7);
+
+      // Facebook OAuth scopes for Instagram Business
+      // Added business_management to access Business Portfolio assets
+      const scope = 'pages_show_list,instagram_basic,instagram_manage_comments,instagram_content_publish,pages_read_engagement,business_management';
+
+      // Use Facebook OAuth dialog
+      const oauthUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth?` +
+        `client_id=${this.appId}` +
+        `&redirect_uri=${encodeURIComponent(this.redirectUri)}` +
+        `&scope=${scope}` +
+        `&response_type=code` +
+        `&state=${state}`;
+
+      console.log('🔐 [INSTAGRAM] Generated OAuth URL:', oauthUrl);
+
+      return { status: 200, json: { success: true, oauthUrl, state } };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error generating OAuth URL:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Handle OAuth callback and exchange code for token
+   * Using Facebook Graph API flow
+   */
+  async handleCallback(req, res) {
+    try {
+      const { code, state, userId } = req.body;
+
+      if (!code || !userId) {
+        return { status: 400, json: { error: 'Code and userId are required' } };
+      }
+
+      console.log('🔐 [INSTAGRAM] Exchanging code for access token...');
+
+      // Step 1: Exchange code for short-lived access token via Facebook Graph API
+      const tokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token?` +
+        `client_id=${this.appId}` +
+        `&redirect_uri=${encodeURIComponent(this.redirectUri)}` +
+        `&client_secret=${this.appSecret}` +
+        `&code=${code}`;
+
+      const tokenResponse = await fetch(tokenUrl);
+      const tokenData = await tokenResponse.json();
+
+      if (!tokenData.access_token) {
+        console.error('❌ [INSTAGRAM] Token exchange failed:', tokenData);
+        return { status: 400, json: { error: 'Failed to get access token', details: tokenData } };
+      }
+
+      console.log('✅ [INSTAGRAM] Got short-lived access token');
+
+      // Step 2: Exchange for long-lived token
+      const longLivedUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token?` +
+        `grant_type=fb_exchange_token` +
+        `&client_id=${this.appId}` +
+        `&client_secret=${this.appSecret}` +
+        `&fb_exchange_token=${tokenData.access_token}`;
+
+      const longLivedResponse = await fetch(longLivedUrl);
+      const longLivedData = await longLivedResponse.json();
+      const accessToken = longLivedData.access_token || tokenData.access_token;
+
+      console.log('✅ [INSTAGRAM] Got long-lived access token');
+
+      // Step 3: Get Facebook Pages the user manages
+      const pagesResponse = await fetch(
+        `https://graph.facebook.com/${this.apiVersion}/me/accounts?access_token=${accessToken}`
+      );
+      const pagesData = await pagesResponse.json();
+
+      console.log('📄 [INSTAGRAM] Raw pages response:', JSON.stringify(pagesData, null, 2));
+
+      if (!pagesData.data || pagesData.data.length === 0) {
+        return { status: 400, json: { error: 'No Facebook Pages found. You need a Facebook Page linked to your Instagram Business account.' } };
+      }
+
+      console.log('✅ [INSTAGRAM] Found Facebook Pages:', pagesData.data.length);
+      console.log('📄 [INSTAGRAM] Page names:', pagesData.data.map(p => p.name).join(', '));
+
+      // Step 4: Find ALL Pages that have IG Business Accounts linked
+      const igLinkedPages = [];
+
+      for (const page of pagesData.data) {
+        console.log(`🔍 [INSTAGRAM] Checking page: ${page.name} (ID: ${page.id})`);
+
+        const pageData = await fetch(
+          `https://graph.facebook.com/${this.apiVersion}/${page.id}?fields=instagram_business_account&access_token=${page.access_token}`
+        ).then(res => res.json());
+
+        console.log(`🔍 [INSTAGRAM] Page ${page.name} IG data:`, JSON.stringify(pageData));
+
+        if (pageData.instagram_business_account?.id) {
+          igLinkedPages.push({
+            ...page,
+            igId: pageData.instagram_business_account.id
+          });
+          console.log(`✅ [INSTAGRAM] Found IG-linked Page: ${page.name} (ID: ${page.id}) → IG: ${pageData.instagram_business_account.id}`);
+        } else {
+          console.log(`⏭️ [INSTAGRAM] Skipping Page: ${page.name} - No IG Business Account`);
+        }
+      }
+
+      console.log(`📊 [INSTAGRAM] Total IG-linked pages found: ${igLinkedPages.length}`);
+
+      if (igLinkedPages.length === 0) {
+        return {
+          status: 400,
+          json: {
+            error: 'No Instagram Business Account connected to any of your Facebook Pages. Please connect your Instagram Business account to a Facebook Page first.'
+          }
+        };
+      }
+
+      // Connect ALL IG-linked pages (not just the first one)
+      let userDoc = await Instagram.findOne({ userId });
+      const connectedAccounts = [];
+
+      for (const selectedPage of igLinkedPages) {
+        const pageAccessToken = selectedPage.access_token;
+        const igBusinessAccountId = selectedPage.igId;
+
+        console.log('📌 [INSTAGRAM] Processing Page:', selectedPage.name);
+        console.log('📌 [INSTAGRAM] IG Business Account ID:', igBusinessAccountId);
+
+        // Step 5: Get Instagram account details
+        const igDetailsResponse = await fetch(
+          `https://graph.facebook.com/${this.apiVersion}/${igBusinessAccountId}?fields=id,username,name,profile_picture_url&access_token=${pageAccessToken}`
+        );
+        const igDetails = await igDetailsResponse.json();
+
+        console.log('✅ [INSTAGRAM] Got IG account details:', igDetails.username);
+
+        // Build account object
+        const newAccount = {
+          instagramBusinessAccountId: igBusinessAccountId,
+          facebookPageId: selectedPage.id,
+          facebookPageName: selectedPage.name,
+          accessToken: pageAccessToken,
+          instagramUsername: igDetails.username,
+          instagramName: igDetails.name || igDetails.username,
+          profilePictureUrl: igDetails.profile_picture_url,
+          isConnected: true,
+          connectedAt: new Date(),
+        };
+
+        connectedAccounts.push(newAccount);
+      }
+
+      // Step 6: Save ALL accounts to database
+      console.log('📦 [INSTAGRAM] Existing userDoc:', userDoc ? 'Found' : 'Not found');
+      console.log('📦 [INSTAGRAM] Existing accounts array:', userDoc?.accounts?.length || 0);
+      console.log('📦 [INSTAGRAM] New accounts to add:', connectedAccounts.length);
+
+      if (!userDoc) {
+        // Create new document with all accounts
+        console.log('📦 [INSTAGRAM] Creating new user document with', connectedAccounts.length, 'accounts...');
+        userDoc = await Instagram.create({
+          userId,
+          accounts: connectedAccounts,
+          // Also save legacy fields with first account for backward compatibility
+          ...connectedAccounts[0],
+          lastTokenRefresh: new Date(),
+        });
+      } else {
+        // Initialize accounts array if it doesn't exist (legacy data migration)
+        if (!userDoc.accounts || !Array.isArray(userDoc.accounts)) {
+          console.log('📦 [INSTAGRAM] Initializing accounts array (legacy migration)...');
+          userDoc.accounts = [];
+
+          // If there's legacy data, migrate it to accounts array
+          if (userDoc.instagramBusinessAccountId) {
+            console.log('📦 [INSTAGRAM] Migrating legacy account:', userDoc.instagramUsername);
+            userDoc.accounts.push({
+              instagramBusinessAccountId: userDoc.instagramBusinessAccountId,
+              facebookPageId: userDoc.facebookPageId,
+              facebookPageName: userDoc.facebookPageName,
+              accessToken: userDoc.accessToken,
+              instagramUsername: userDoc.instagramUsername,
+              instagramName: userDoc.instagramName,
+              profilePictureUrl: userDoc.profilePictureUrl,
+              isConnected: userDoc.isConnected,
+              connectedAt: userDoc.connectedAt || new Date(),
+            });
+          }
+        }
+
+        // Add or update each account
+        for (const newAccount of connectedAccounts) {
+          const existingIdx = userDoc.accounts.findIndex(
+            acc => acc.instagramBusinessAccountId === newAccount.instagramBusinessAccountId
+          );
+
+          if (existingIdx >= 0) {
+            // Update existing account
+            userDoc.accounts[existingIdx] = newAccount;
+            console.log('✅ [INSTAGRAM] Updated existing account:', newAccount.instagramUsername);
+          } else {
+            // Add new account
+            userDoc.accounts.push(newAccount);
+            console.log('✅ [INSTAGRAM] Added new account:', newAccount.instagramUsername);
+          }
+        }
+
+        // Update legacy fields with the first new account for backward compatibility
+        const firstAccount = connectedAccounts[0];
+        userDoc.instagramBusinessAccountId = firstAccount.instagramBusinessAccountId;
+        userDoc.facebookPageId = firstAccount.facebookPageId;
+        userDoc.facebookPageName = firstAccount.facebookPageName;
+        userDoc.accessToken = firstAccount.accessToken;
+        userDoc.instagramUsername = firstAccount.instagramUsername;
+        userDoc.instagramName = firstAccount.instagramName;
+        userDoc.profilePictureUrl = firstAccount.profilePictureUrl;
+        userDoc.isConnected = true;
+        userDoc.lastTokenRefresh = new Date();
+
+        await userDoc.save();
+      }
+
+      console.log('✅ [INSTAGRAM] Instagram accounts connected for user:', userId);
+      console.log('✅ [INSTAGRAM] Total accounts:', userDoc.accounts.length);
+      console.log('✅ [INSTAGRAM] All usernames:', userDoc.accounts.map(a => a.instagramUsername).join(', '));
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          message: `${connectedAccounts.length} Instagram account(s) connected successfully`,
+          connectedAccounts: connectedAccounts.map(a => ({
+            username: a.instagramUsername,
+            name: a.instagramName,
+            profilePictureUrl: a.profilePictureUrl,
+          })),
+          totalAccounts: userDoc.accounts.length,
+        },
+      };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error in callback:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Get all connected Instagram accounts for a user
+   */
+  async getInstagramInfo(req) {
+    try {
+      const { userId } = req.params;
+
+      console.log('📋 [INSTAGRAM] Getting info for user:', userId);
+
+      const instagram = await Instagram.findOne({ userId });
+
+      if (!instagram) {
+        console.log('📋 [INSTAGRAM] No document found for user');
+        return { status: 404, json: { error: 'Instagram account not connected' } };
+      }
+
+      console.log('📋 [INSTAGRAM] Document found, accounts:', instagram.accounts?.length || 0);
+
+      // Handle legacy data - if no accounts array but has legacy fields
+      let accounts = [];
+
+      if (instagram.accounts && Array.isArray(instagram.accounts) && instagram.accounts.length > 0) {
+        accounts = instagram.accounts
+          .filter(acc => acc.isConnected)
+          .map(acc => ({
+            id: acc.instagramBusinessAccountId,
+            username: acc.instagramUsername,
+            name: acc.instagramName,
+            profilePictureUrl: acc.profilePictureUrl,
+            facebookPageName: acc.facebookPageName,
+            connectedAt: acc.connectedAt,
+          }));
+      } else if (instagram.instagramBusinessAccountId && instagram.isConnected) {
+        // Legacy data - return as single account
+        console.log('📋 [INSTAGRAM] Using legacy data for account');
+        accounts = [{
+          id: instagram.instagramBusinessAccountId,
+          username: instagram.instagramUsername,
+          name: instagram.instagramName,
+          profilePictureUrl: instagram.profilePictureUrl,
+          facebookPageName: instagram.facebookPageName,
+          connectedAt: instagram.connectedAt,
+        }];
+      }
+
+      if (accounts.length === 0) {
+        console.log('📋 [INSTAGRAM] No connected accounts found');
+        return { status: 404, json: { error: 'Instagram account not connected' } };
+      }
+
+      console.log('📋 [INSTAGRAM] Returning accounts:', accounts.map(a => a.username).join(', '));
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          accounts,
+          // Legacy single account (for backward compatibility)
+          instagram: {
+            username: instagram.instagramUsername,
+            name: instagram.instagramName,
+            profilePictureUrl: instagram.profilePictureUrl,
+            isConnected: instagram.isConnected,
+            connectedAt: instagram.connectedAt,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error getting info:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Disconnect a specific Instagram account or all accounts
+   */
+  async disconnectInstagram(req) {
+    try {
+      const { userId } = req.params;
+      const { accountId } = req.body || {}; // Optional: specific account to disconnect
+
+      const instagram = await Instagram.findOne({ userId });
+
+      if (!instagram) {
+        return { status: 404, json: { error: 'No Instagram accounts found' } };
+      }
+
+      if (accountId) {
+        // Disconnect specific account
+        const accIdx = instagram.accounts.findIndex(
+          acc => acc.instagramBusinessAccountId === accountId
+        );
+
+        if (accIdx >= 0) {
+          instagram.accounts[accIdx].isConnected = false;
+          await instagram.save();
+          console.log('✅ [INSTAGRAM] Account disconnected:', accountId);
+        }
+
+        // Check if any accounts are still connected
+        const hasConnected = instagram.accounts.some(acc => acc.isConnected);
+        if (!hasConnected) {
+          instagram.isConnected = false;
+          await instagram.save();
+        }
+      } else {
+        // Disconnect all accounts
+        instagram.accounts.forEach(acc => { acc.isConnected = false; });
+        instagram.isConnected = false;
+        await instagram.save();
+        console.log('✅ [INSTAGRAM] All accounts disconnected for user:', userId);
+      }
+
+      return { status: 200, json: { success: true, message: 'Instagram disconnected' } };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error disconnecting:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Publish image to Instagram
+   * Supports multi-account: specify accountId to publish to a specific account
+   */
+  async publishImage(req) {
+    try {
+      const { userId, imageUrl, caption, accountId } = req.body;
+
+      if (!userId || !imageUrl) {
+        return { status: 400, json: { error: 'userId and imageUrl are required' } };
+      }
+
+      // Get Instagram credentials
+      const instagram = await Instagram.findOne({ userId });
+
+      console.log('📸 [INSTAGRAM] Looking for userId:', userId);
+      console.log('📸 [INSTAGRAM] Instagram doc found:', instagram ? 'Yes' : 'No');
+
+      if (!instagram) {
+        return { status: 404, json: { error: 'Instagram account not connected' } };
+      }
+
+      console.log('📸 [INSTAGRAM] Accounts array:', instagram.accounts?.length || 0);
+      console.log('📸 [INSTAGRAM] Accounts data:', JSON.stringify(instagram.accounts?.map(a => ({
+        id: a.instagramBusinessAccountId,
+        username: a.instagramUsername,
+        isConnected: a.isConnected,
+      })), null, 2));
+
+      let account;
+
+      if (accountId) {
+        console.log('📸 [INSTAGRAM] Looking for specific accountId:', accountId);
+        // Find specific account
+        account = instagram.accounts.find(
+          acc => acc.instagramBusinessAccountId === accountId && acc.isConnected
+        );
+      } else {
+        console.log('📸 [INSTAGRAM] Looking for first connected account...');
+        // Use first connected account
+        account = instagram.accounts.find(acc => acc.isConnected);
+      }
+
+      console.log('📸 [INSTAGRAM] Account found:', account ? account.instagramUsername : 'None');
+
+      if (!account) {
+        // Fallback: try legacy data
+        if (instagram.isConnected && instagram.instagramBusinessAccountId) {
+          console.log('📸 [INSTAGRAM] Using legacy data as fallback');
+          account = {
+            instagramBusinessAccountId: instagram.instagramBusinessAccountId,
+            accessToken: instagram.accessToken,
+            instagramUsername: instagram.instagramUsername,
+          };
+        } else {
+          return { status: 404, json: { error: 'No connected Instagram account found' } };
+        }
+      }
+
+      const { instagramBusinessAccountId, accessToken, instagramUsername } = account;
+
+      console.log('📸 [INSTAGRAM] Publishing image to Instagram...');
+      console.log('📸 [INSTAGRAM] Image URL:', imageUrl);
+
+      // Step 1: Create media container
+      const containerUrl = `https://graph.facebook.com/${this.apiVersion}/${instagramBusinessAccountId}/media`;
+      const containerParams = new URLSearchParams({
+        image_url: imageUrl,
+        caption: caption || 'Created with Velos AI ✨',
+        access_token: accessToken,
+      });
+
+      const containerResponse = await fetch(`${containerUrl}?${containerParams}`, {
+        method: 'POST',
+      });
+      const containerData = await containerResponse.json();
+
+      if (containerData.error) {
+        console.error('❌ [INSTAGRAM] Container creation failed:', containerData.error);
+        return { status: 400, json: { error: containerData.error.message } };
+      }
+
+      const containerId = containerData.id;
+      console.log('✅ [INSTAGRAM] Media container created:', containerId);
+
+      // Step 2: Wait for container to be ready (poll status)
+      let ready = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (!ready && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+
+        const statusUrl = `https://graph.facebook.com/${this.apiVersion}/${containerId}?fields=status_code&access_token=${accessToken}`;
+        const statusResponse = await fetch(statusUrl);
+        const statusData = await statusResponse.json();
+
+        console.log('📸 [INSTAGRAM] Container status:', statusData.status_code);
+
+        if (statusData.status_code === 'FINISHED') {
+          ready = true;
+        } else if (statusData.status_code === 'ERROR') {
+          return { status: 400, json: { error: 'Media processing failed' } };
+        }
+
+        attempts++;
+      }
+
+      if (!ready) {
+        return { status: 400, json: { error: 'Media processing timed out' } };
+      }
+
+      // Step 3: Publish the container
+      const publishUrl = `https://graph.facebook.com/${this.apiVersion}/${instagramBusinessAccountId}/media_publish`;
+      const publishParams = new URLSearchParams({
+        creation_id: containerId,
+        access_token: accessToken,
+      });
+
+      const publishResponse = await fetch(`${publishUrl}?${publishParams}`, {
+        method: 'POST',
+      });
+      const publishData = await publishResponse.json();
+
+      if (publishData.error) {
+        console.error('❌ [INSTAGRAM] Publish failed:', publishData.error);
+        return { status: 400, json: { error: publishData.error.message } };
+      }
+
+      console.log('✅ [INSTAGRAM] Image published! Media ID:', publishData.id);
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          message: 'Image published to Instagram!',
+          mediaId: publishData.id,
+          username: instagramUsername,
+        },
+      };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error publishing:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Refresh access token before it expires
+   * Facebook Page tokens from pages_show_list are long-lived and don't expire
+   * But we can refresh the user token if needed
+   */
+  async refreshToken(req) {
+    try {
+      const { userId, accountId } = req.body;
+
+      const instagram = await Instagram.findOne({ userId });
+
+      if (!instagram) {
+        return { status: 404, json: { error: 'No Instagram accounts found' } };
+      }
+
+      let account;
+      if (accountId) {
+        account = instagram.accounts.find(
+          acc => acc.instagramBusinessAccountId === accountId
+        );
+      } else {
+        account = instagram.accounts[0];
+      }
+
+      if (!account) {
+        return { status: 404, json: { error: 'Account not found' } };
+      }
+
+      // Refresh the token
+      const refreshUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token?` +
+        `grant_type=fb_exchange_token` +
+        `&client_id=${this.appId}` +
+        `&client_secret=${this.appSecret}` +
+        `&fb_exchange_token=${account.accessToken}`;
+
+      const response = await fetch(refreshUrl);
+      const data = await response.json();
+
+      if (data.error) {
+        console.error('❌ [INSTAGRAM] Token refresh failed:', data.error);
+        return { status: 400, json: { error: data.error.message } };
+      }
+
+      // Update the token
+      account.accessToken = data.access_token;
+      instagram.lastTokenRefresh = new Date();
+      await instagram.save();
+
+      console.log('✅ [INSTAGRAM] Token refreshed for:', account.instagramUsername);
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          message: 'Token refreshed successfully',
+          expiresIn: data.expires_in,
+        },
+      };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error refreshing token:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+}
+
+module.exports = InstagramController;
