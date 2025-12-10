@@ -16,6 +16,11 @@ const memorySchema = new mongoose.Schema({
     type: String,
     index: true,
   },
+  // Chat-specific memories - each chat has its own memory context
+  imageChatId: {
+    type: String,
+    index: true,
+  },
   type: {
     type: String,
     enum: ['preference', 'fact', 'style', 'goal', 'instruction', 'context'],
@@ -54,5 +59,6 @@ const memorySchema = new mongoose.Schema({
 // Compound index for efficient memory retrieval
 memorySchema.index({ userId: 1, type: 1, importance: -1 });
 memorySchema.index({ userId: 1, profileId: 1 });
+memorySchema.index({ userId: 1, imageChatId: 1 });
 
 module.exports = mongoose.model('Memory', memorySchema);

@@ -98,10 +98,10 @@ class MemoryService {
   }
 
   /**
-   * Add or update a memory
+   * Add or update a memory (chat-specific)
    */
   async addMemory(userId, memoryData) {
-    const { type, key, importance = 3, profileId, source = 'chat' } = memoryData;
+    const { type, key, importance = 3, profileId, imageChatId, source = 'chat' } = memoryData;
 
     // Ensure value is always a string (AI sometimes returns arrays)
     let value = memoryData.value;
@@ -111,8 +111,13 @@ class MemoryService {
       value = String(value);
     }
 
-    // Check if similar memory exists
-    let memory = await Memory.findOne({ userId, type, key });
+    // Check if similar memory exists for this specific chat
+    const query = { userId, type, key };
+    if (imageChatId) {
+      query.imageChatId = imageChatId;
+    }
+
+    let memory = await Memory.findOne(query);
 
     if (memory) {
       memory.value = value;
@@ -124,6 +129,7 @@ class MemoryService {
       memory = await Memory.create({
         userId,
         profileId,
+        imageChatId,
         type,
         key,
         value,
@@ -136,15 +142,31 @@ class MemoryService {
   }
 
   /**
-   * Batch add memories extracted from chat
+   * Batch add memories extracted from chat (chat-specific)
    */
-  async addMemoriesFromChat(userId, profileId, memories) {
+  async addMemoriesFromChat(userId, profileId, memories, imageChatId = null) {
     const results = [];
     for (const mem of memories) {
-      const result = await this.addMemory(userId, { ...mem, profileId, source: 'chat' });
+      const result = await this.addMemory(userId, { ...mem, profileId, imageChatId, source: 'chat' });
       results.push(result);
     }
     return results;
+  }
+
+  /**
+   * Get memories for a specific chat only
+   */
+  async getChatMemories(userId, imageChatId, options = {}) {
+    const { minImportance = 1, limit = 50, types } = options;
+
+    const query = { userId, imageChatId };
+    if (minImportance > 1) query.importance = { $gte: minImportance };
+    if (types?.length) query.type = { $in: types };
+
+    return Memory.find(query)
+      .sort({ importance: -1, updatedAt: -1 })
+      .limit(limit)
+      .lean();
   }
 
   /**
@@ -236,10 +258,10 @@ class MemoryService {
   /**
    * Build context string for LLM from memories and profile
    * @param {string} userId
-   * @param {object} options - { includeMemories: true, onlyPreferences: false }
+   * @param {object} options - { imageChatId, includeMemories: true }
    */
   async buildContextForLLM(userId, options = {}) {
-    const { includeMemories = true, onlyPreferences = false } = options;
+    const { imageChatId = null, includeMemories = true } = options;
     const profile = await this.getActiveProfile(userId);
 
     let context = '';
@@ -257,19 +279,14 @@ class MemoryService {
       if (profile.platforms?.length) context += `Platforms: ${profile.platforms.join(', ')}\n`;
     }
 
-    // Memory context - optionally include and filter
-    if (includeMemories) {
-      const memories = await this.getMemories(userId, { minImportance: 2, limit: 30 });
+    // Memory context - only load memories for THIS specific chat
+    if (includeMemories && imageChatId) {
+      const memories = await this.getChatMemories(userId, imageChatId, { minImportance: 1, limit: 30 });
 
-      // If onlyPreferences, filter to only preference/style type memories (not facts/context)
-      const filteredMemories = onlyPreferences
-        ? memories.filter(m => ['preference', 'style', 'goal'].includes(m.type))
-        : memories;
-
-      if (filteredMemories.length > 0) {
-        context += `\n## Known Preferences & Facts\n`;
+      if (memories.length > 0) {
+        context += `\n## Chat Context\n`;
         const groupedMemories = {};
-        for (const mem of filteredMemories) {
+        for (const mem of memories) {
           if (!groupedMemories[mem.type]) groupedMemories[mem.type] = [];
           groupedMemories[mem.type].push(`${mem.key}: ${mem.value}`);
         }

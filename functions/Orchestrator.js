@@ -71,10 +71,12 @@ class OrchestratorService {
 
     try {
       console.log('🎯 [ORCHESTRATOR] Processing message for user:', userId);
+      console.log('💬 [ORCHESTRATOR] Chat ID:', imageChatId || 'new chat');
 
-      // Step 1: Load profile and memory context
+      // Step 1: Load profile and chat-specific memory context
       const profile = await this.memoryService.getActiveProfile(userId);
-      const contextString = await this.memoryService.buildContextForLLM(userId);
+      // Only load memories for THIS specific chat (not global memories)
+      const contextString = await this.memoryService.buildContextForLLM(userId, { imageChatId });
 
       console.log('📋 [ORCHESTRATOR] Loaded profile:', profile.name);
 
@@ -83,11 +85,12 @@ class OrchestratorService {
       const intent = await this.determineIntent(message, contextString, hasImages);
       console.log('🎯 [ORCHESTRATOR] Detected intent:', intent.intent);
 
-      // Step 3: Extract and save any memories from the message
+      // Step 3: Extract and save any memories from the message (chat-specific)
       const insights = await this.contentEngine.extractMemoriesFromMessage(message, contextString);
       if (insights.memories?.length > 0) {
-        await this.memoryService.addMemoriesFromChat(userId, profile.profileId, insights.memories);
-        console.log('💾 [ORCHESTRATOR] Saved', insights.memories.length, 'memories');
+        // Save memories tied to this specific chat
+        await this.memoryService.addMemoriesFromChat(userId, profile.profileId, insights.memories, imageChatId);
+        console.log('💾 [ORCHESTRATOR] Saved', insights.memories.length, 'memories for chat:', imageChatId);
       }
       if (Object.keys(insights.profileUpdates || {}).some(k => insights.profileUpdates[k])) {
         await this.memoryService.updateProfileFromChat(userId, insights.profileUpdates);
@@ -227,14 +230,14 @@ Output JSON:
     const count = intent.contentJob?.count || 1;
     const isCampaign = count > 1 || intent.intent === 'campaign';
 
-    // Build context for prompt generation - only use preferences, not old conversation facts
-    // This prevents previous conversation themes (like "Superman") from bleeding into new chats
+    // Build context for prompt generation - use ONLY this chat's memories
+    // Each chat has its own isolated memory context
     const contextString = await this.memoryService.buildContextForLLM(userId, {
-      includeMemories: true,
-      onlyPreferences: true
+      imageChatId: existingChatId,
+      includeMemories: true
     });
 
-    // Step 1: Generate design brief based on current message + brand preferences only
+    // Step 1: Generate design brief based on current message + this chat's context
     const designBrief = await this.contentEngine.generateDesignBrief(message, {
       profileContext: contextString,
       referenceType: referenceImages.length > 0 ? 'face' : null,
