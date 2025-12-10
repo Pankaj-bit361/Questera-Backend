@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const { v4: uuidv4 } = require('uuid');
 
-// Plan definitions with Razorpay Plan IDs
+// Plan definitions with Razorpay Plan IDs (INR)
 const PLAN_CONFIG = {
   free: {
     name: 'Free',
@@ -9,23 +9,23 @@ const PLAN_CONFIG = {
     price: 0,
     razorpayPlanId: null,
   },
-  launch: {
-    name: 'Velos Launch',
+  growth: {
+    name: 'Velos Growth',
     credits: 100,
-    price: 10,
-    razorpayPlanId: 'plan_Rg346YrRNwpUR4',
+    price: 1000, // ₹1,000/month
+    razorpayPlanId: 'plan_RWN6JIj7uVFq68',
   },
-  standard: {
-    name: 'Velos Standard',
+  pro: {
+    name: 'Velos Pro',
     credits: 250,
-    price: 20,
-    razorpayPlanId: 'plan_Rg370bssLaU0Ss',
+    price: 1800, // ₹1,800/month
+    razorpayPlanId: 'plan_RWMcpE4Eq1vFo7',
   },
-  scale: {
-    name: 'Velos Scale',
-    credits: 3000,
-    price: 100,
-    razorpayPlanId: 'plan_Rg3C5JYhnVNavL',
+  business: {
+    name: 'Velos Business',
+    credits: 1500,
+    price: 4500, // ₹4,500/month
+    razorpayPlanId: 'plan_RWN709UXPBQVrW',
   },
 };
 
@@ -84,7 +84,7 @@ const creditsSchema = new mongoose.Schema({
   // Current plan
   plan: {
     type: String,
-    enum: ['free', 'launch', 'standard', 'scale'],
+    enum: ['free', 'growth', 'pro', 'business'],
     default: 'free',
   },
   planName: {
