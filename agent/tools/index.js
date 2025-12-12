@@ -4,6 +4,8 @@ const schedulePostTool = require('./schedulePost');
 const replyTool = require('./reply');
 const getAccountsTool = require('./getAccounts');
 const createVariationsTool = require('./createVariations');
+const extractWebsiteTool = require('./extractWebsite');
+const deepResearchTool = require('./deepResearch');
 
 
 const allTools = [
@@ -12,7 +14,9 @@ const allTools = [
    schedulePostTool,
    replyTool,
    getAccountsTool,
-   createVariationsTool
+   createVariationsTool,
+   extractWebsiteTool,
+   deepResearchTool
 ];
 
 
@@ -23,6 +27,8 @@ module.exports = {
    replyTool,
    getAccountsTool,
    createVariationsTool,
+   extractWebsiteTool,
+   deepResearchTool,
    allTools
 };
 

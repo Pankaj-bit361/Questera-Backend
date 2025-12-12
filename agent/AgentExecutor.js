@@ -67,12 +67,17 @@ RULES:
          if (response.tool) {
             const toolResult = await this.executeTool(response.tool, response.params, context);
 
-            // Check if this is a multi-step workflow (generate_and_post)
-            const isMultiStep = context.routerIntent === 'generate_and_post';
+            // Check if this is a multi-step workflow
+            const isGenerateAndPost = context.routerIntent === 'generate_and_post';
+            const isWebsiteContent = context.routerIntent === 'website_content';
             const isGenerateStep = response.tool === 'generate_image';
-            const shouldContinue = isMultiStep && isGenerateStep && toolResult.success;
+            const isExtractStep = response.tool === 'extract_website';
 
-            if (toolResult.success && !shouldContinue) {
+            // Determine if we should continue to next step
+            const shouldContinueToPost = isGenerateAndPost && isGenerateStep && toolResult.success;
+            const shouldContinueToGenerate = isWebsiteContent && isExtractStep && toolResult.success;
+
+            if (toolResult.success && !shouldContinueToPost && !shouldContinueToGenerate) {
                // Single action complete - return result
                return {
                   success: true,
@@ -82,7 +87,34 @@ RULES:
                };
             }
 
-            if (toolResult.success && shouldContinue) {
+            if (toolResult.success && shouldContinueToGenerate) {
+               // Multi-step: website extracted, now generate content with brand context
+               console.log('🌐 [EXECUTOR] Website extracted, continuing to generate content...');
+
+               messages.push({
+                  role: 'assistant',
+                  content: JSON.stringify(response)
+               });
+
+               // Pass website data as context for image generation
+               const websiteData = toolResult.websiteData;
+               context.websiteData = websiteData;
+
+               messages.push({
+                  role: 'user',
+                  content: `Website extracted successfully. Brand context:
+- Title: ${websiteData?.title || 'N/A'}
+- Description: ${websiteData?.description || 'N/A'}
+- Headline: ${websiteData?.headline || 'N/A'}
+- Key Points: ${websiteData?.keyPoints?.join(', ') || 'N/A'}
+
+Now create an engaging image and/or content for this brand based on the original user request. Use this context to make it relevant and on-brand.`
+               });
+
+               continue;
+            }
+
+            if (toolResult.success && shouldContinueToPost) {
                // Multi-step: image generated, now continue to post
                console.log('🔗 [EXECUTOR] Multi-step workflow: image generated, continuing to post...');
 

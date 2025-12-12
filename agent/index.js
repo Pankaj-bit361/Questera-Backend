@@ -7,6 +7,8 @@ const PromptValidator = require('./PromptValidator');
 const { FailureHandler, FAILURE_RESPONSES } = require('./FailureResponses');
 const { PlatformDefaults, PLATFORM_DEFAULTS } = require('./PlatformDefaults');
 const { Telemetry, LogTypes } = require('./Telemetry');
+const WebsiteExtractor = require('./WebsiteExtractor');
+const DeepResearch = require('./DeepResearch');
 
 
 function createAgent(options = {}) {
@@ -76,6 +78,9 @@ module.exports = {
    PlatformDefaults,
    PLATFORM_DEFAULTS,
    Telemetry,
-   LogTypes
+   LogTypes,
+   // Website & Research
+   WebsiteExtractor,
+   DeepResearch
 };
 
