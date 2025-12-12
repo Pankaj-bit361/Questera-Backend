@@ -1,6 +1,7 @@
 const ScheduledPost = require('../models/scheduledPost');
 const Campaign = require('../models/campaign');
 const SocialAccount = require('../models/socialAccount');
+const Instagram = require('../models/instagram');
 const InstagramService = require('./InstagramService');
 const { v4: uuidv4 } = require('uuid');
 
@@ -31,16 +32,32 @@ class SchedulerService {
       contentJobId,
     } = postData;
 
-    // Validate social account
-    const account = await SocialAccount.findOne({ accountId: socialAccountId, userId });
+    // Validate social account - check SocialAccount first, then Instagram collection
+    let account = await SocialAccount.findOne({ accountId: socialAccountId, userId });
+    let platform = account?.platform || 'instagram';
+    let accountIdToStore = socialAccountId;
+
     if (!account) {
-      throw new Error('Social account not found');
+      // Try to find in Instagram collection (by instagramBusinessAccountId)
+      const igDoc = await Instagram.findOne({ userId });
+      if (igDoc && igDoc.accounts) {
+        const igAccount = igDoc.accounts.find(a => a.instagramBusinessAccountId === socialAccountId);
+        if (igAccount) {
+          console.log('📅 [SCHEDULER] Found account in Instagram collection:', igAccount.instagramUsername);
+          platform = 'instagram';
+          accountIdToStore = igAccount.instagramBusinessAccountId;
+        } else {
+          throw new Error('Social account not found');
+        }
+      } else {
+        throw new Error('Social account not found');
+      }
     }
 
     const post = await ScheduledPost.create({
       userId,
-      accountId: socialAccountId,
-      platform: account.platform,
+      accountId: accountIdToStore,
+      platform,
       imageUrl,
       imageUrls: imageUrls || [],
       caption,

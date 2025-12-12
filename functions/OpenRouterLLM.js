@@ -6,7 +6,7 @@ class OpenRouterLLM {
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY;
     this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-    this.model = 'moonshotai/kimi-k2-thinking'; // Fast thinking model
+    this.model = 'google/gemini-2.5-flash-lite-preview-09-2025'; // Fast thinking model
   }
 
   /**

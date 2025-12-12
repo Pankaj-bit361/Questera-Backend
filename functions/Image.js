@@ -55,20 +55,26 @@ class ImageController {
     async generateImages(req, res) {
         try {
             console.log('🚀 [GENERATE] Starting image generation...');
-            console.log('📥 [GENERATE] Request body:', JSON.stringify(req.body, null, 2));
+            console.log('📥 [GENERATE] Request body keys:', Object.keys(req.body));
+            console.log('📥 [GENERATE] Has images param:', !!req.body.images);
+            console.log('📥 [GENERATE] Has referenceImages param:', !!req.body.referenceImages);
+            console.log('📥 [GENERATE] Images count:', req.body.images?.length || 0);
+            console.log('📥 [GENERATE] ReferenceImages count:', req.body.referenceImages?.length || 0);
 
-            const {
+            let {
                 prompt,
                 originalMessage, // Original user message (before enhancement) for UI display
                 userId,
                 imageChatId,
                 images,
+                isEdit, // Flag to indicate this is an edit operation
                 aspectRatio: aspectRatioOverride,
                 imageSize: imageSizeOverride,
                 style: styleOverride,
                 viralContent, // Viral content (hashtags, description) from orchestrator
             } = req.body;
 
+        imageSizeOverride = '4K';
             if (!prompt) {
                 return { status: 400, json: { error: 'Prompt is required' } };
             }
@@ -112,7 +118,7 @@ class ImageController {
             const finalSettings = {
                 ...projectSettings,
                 ...(aspectRatioOverride && { aspectRatio: aspectRatioOverride }),
-                ...(imageSizeOverride && { imageSize: imageSizeOverride }),
+                ...(imageSizeOverride && { imageSize: '4K' }),
                 ...(styleOverride && { style: styleOverride }),
             };
 
@@ -152,6 +158,13 @@ class ImageController {
             const parts = [{ text: enhancedPrompt }];
             const referenceImageUrls = [];
 
+            console.log('🔍 [GENERATE] Images check:', {
+                hasImages: !!images,
+                isArray: Array.isArray(images),
+                length: images?.length || 0,
+                firstImageDataLength: images?.[0]?.data?.length || 0,
+            });
+
             if (images && Array.isArray(images) && images.length > 0) {
                 console.log('🖼️ [GENERATE] Processing', images.length, 'reference images...');
                 for (const image of images) {
@@ -159,10 +172,13 @@ class ImageController {
                     let mimeType = image.mimeType || 'image/jpeg';
 
                     // Skip SVG images - Gemini doesn't support them
-                    if (mimeType === 'image/svg+xml' || (typeof imageData === 'string' && imageData.includes('svg'))) {
+                    // Only check mimeType, NOT the base64 data (which could contain 'svg' randomly)
+                    if (mimeType === 'image/svg+xml') {
                         console.log('⚠️ [GENERATE] Skipping SVG image - Gemini does not support SVG format');
                         continue;
                     }
+
+                    console.log('📷 [GENERATE] Adding image to parts - mimeType:', mimeType, 'dataLength:', imageData?.length || 0);
 
                     if (typeof imageData === 'string' && imageData.startsWith('http')) {
                         console.log('🌐 [GENERATE] Fetching image from URL...');
@@ -200,6 +216,26 @@ class ImageController {
                     parts,
                 },
             ];
+
+            // Debug: Log contents summary (truncated to avoid huge base64 strings)
+            const contentsSummary = {
+                role: contents[0].role,
+                partsCount: contents[0].parts.length,
+                parts: contents[0].parts.map((part, idx) => {
+                    if (part.text) {
+                        return { type: 'text', preview: part.text.slice(0, 100) + (part.text.length > 100 ? '...' : '') };
+                    } else if (part.inlineData) {
+                        return {
+                            type: 'inlineData',
+                            mimeType: part.inlineData.mimeType,
+                            dataLength: part.inlineData.data?.length || 0,
+                            dataPreview: part.inlineData.data?.slice(0, 50) + '...'
+                        };
+                    }
+                    return { type: 'unknown', keys: Object.keys(part) };
+                })
+            };
+            console.log('📋 [GENERATE] Contents being sent to Gemini:', JSON.stringify(contentsSummary, null, 2));
 
             console.log('🤖 [GENERATE] Calling Gemini API...');
             console.time('gemini-api-call');
@@ -245,12 +281,23 @@ class ImageController {
                             mimeType: inlineData.mimeType,
                             url: imageUrl,
                         });
+
+                        // For edit operations, only generate 1 image
+                        if (isEdit && generatedImages.length >= 1) {
+                            console.log('✏️ [GENERATE] Edit operation complete - stopping after 1 image');
+                            break;
+                        }
                     }
 
                     if (chunk.text) {
                         console.log(`💬 [GENERATE] Got text in chunk #${chunkCount}:`, chunk.text.substring(0, 100));
                         textResponse += chunk.text;
                     }
+                }
+
+                // Break outer loop if edit is complete
+                if (isEdit && generatedImages.length >= 1) {
+                    break;
                 }
             }
 
@@ -471,7 +518,9 @@ class ImageController {
     async bulkGenerateImages(req, res) {
         try {
             console.log('🚀 [BULK GENERATE] Starting bulk image generation...');
-            console.log('📥 [BULK GENERATE] Request body:', JSON.stringify(req.body, null, 2));
+            console.log('📥 [BULK GENERATE] Request body keys:', Object.keys(req.body));
+            console.log('📥 [BULK GENERATE] Has referenceImage:', !!req.body.referenceImage);
+            console.log('📥 [BULK GENERATE] Prompts count:', req.body.prompts?.length || 0);
 
             const {
                 referenceImage, // Single reference image of the person

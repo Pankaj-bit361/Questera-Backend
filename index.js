@@ -13,6 +13,7 @@ const campaignRouter = require('./routes/Campaign');
 const liveGenRouter = require('./routes/LiveGeneration');
 const analyticsRouter = require('./routes/Analytics');
 const viralRouter = require('./routes/ViralContent');
+const agentRouter = require('./routes/Agent');
 const authMiddleware = require('./middlewares/auth');
 const connectDB = require('./db');
 const SchedulerController = require('./functions/Scheduler');
@@ -51,6 +52,7 @@ app.use('/api/campaigns', campaignRouter); // Campaign Automation
 app.use('/api/live-generation', liveGenRouter); // Live Generation + Auto-Post
 app.use('/api/analytics', analyticsRouter); // Analytics Dashboard
 app.use('/api/viral', viralRouter); // Viral Content Extraction
+app.use('/api/agent', agentRouter); // AI Agent
 
 // Database connection and Server Start
 const startServer = async () => {
