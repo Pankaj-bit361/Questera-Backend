@@ -46,10 +46,21 @@ const editImageTool = {
          imagesToEdit.push({ data: primaryImageUrl, mimeType: 'image/jpeg' });
       }
 
-      // Add any reference images as additional context
+      // Add any reference images as additional context (but skip duplicates of primaryImageUrl)
       if (referenceImages && referenceImages.length > 0) {
-         console.log('🖼️ [EDIT_IMAGE] Adding', referenceImages.length, 'reference images as context');
-         imagesToEdit = [...imagesToEdit, ...referenceImages];
+         // Filter out reference images that are duplicates of the primary image
+         const uniqueRefs = referenceImages.filter(ref => {
+            // Skip if the reference data equals the primary image URL
+            if (ref.data === primaryImageUrl) {
+               console.log('🖼️ [EDIT_IMAGE] Skipping duplicate reference image (same as primary)');
+               return false;
+            }
+            return true;
+         });
+         if (uniqueRefs.length > 0) {
+            console.log('🖼️ [EDIT_IMAGE] Adding', uniqueRefs.length, 'unique reference images as context');
+            imagesToEdit = [...imagesToEdit, ...uniqueRefs];
+         }
       }
 
       // Fallback: If no primary image but have reference images, use those
