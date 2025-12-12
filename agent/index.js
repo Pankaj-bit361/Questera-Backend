@@ -2,6 +2,11 @@ const AgentExecutor = require('./AgentExecutor');
 const ToolRegistry = require('./ToolRegistry');
 const { LLMProvider, OpenRouterProvider, AnthropicProvider } = require('./LLMProvider');
 const { ImageAgent, createImageAgent } = require('./ImageAgent');
+const RouterAgent = require('./RouterAgent');
+const PromptValidator = require('./PromptValidator');
+const { FailureHandler, FAILURE_RESPONSES } = require('./FailureResponses');
+const { PlatformDefaults, PLATFORM_DEFAULTS } = require('./PlatformDefaults');
+const { Telemetry, LogTypes } = require('./Telemetry');
 
 
 function createAgent(options = {}) {
@@ -53,6 +58,7 @@ function defineTool(config) {
 
 
 module.exports = {
+   // Core Agent
    AgentExecutor,
    ToolRegistry,
    LLMProvider,
@@ -61,6 +67,15 @@ module.exports = {
    ImageAgent,
    createAgent,
    createImageAgent,
-   defineTool
+   defineTool,
+   // New Systems
+   RouterAgent,
+   PromptValidator,
+   FailureHandler,
+   FAILURE_RESPONSES,
+   PlatformDefaults,
+   PLATFORM_DEFAULTS,
+   Telemetry,
+   LogTypes
 };
 

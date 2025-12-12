@@ -1,13 +1,20 @@
 const express = require('express');
 const router = express.Router();
 const { createImageAgent } = require('../agent');
+const RouterAgent = require('../agent/RouterAgent');
+const PromptValidator = require('../agent/PromptValidator');
+const { FailureHandler } = require('../agent/FailureResponses');
+const { PlatformDefaults } = require('../agent/PlatformDefaults');
+const { Telemetry } = require('../agent/Telemetry');
 const ImageMessage = require('../models/imageMessage');
 const Image = require('../models/image');
 const { v4: uuidv4 } = require('uuid');
 
 
-// Lazy initialize agent to avoid startup failures if API key is missing
+// Lazy initialize agents to avoid startup failures if API key is missing
 let agent = null;
+let routerAgent = null;
+
 function getAgent() {
    if (!agent) {
       if (!process.env.OPENROUTER_API_KEY) {
@@ -17,6 +24,16 @@ function getAgent() {
       agent = createImageAgent();
    }
    return agent;
+}
+
+function getRouterAgent() {
+   if (!routerAgent) {
+      if (!process.env.OPENROUTER_API_KEY) {
+         return null;
+      }
+      routerAgent = new RouterAgent();
+   }
+   return routerAgent;
 }
 
 // Helper to save a message and link it to the Image document
@@ -70,8 +87,9 @@ router.post('/', async (req, res) => {
       console.log('🖼️ [AGENT ROUTE] Last Image URL:', lastImageUrl || 'none');
       console.log('💬 [AGENT ROUTE] Message:', message);
 
-      // Get agent (lazy init)
+      // Get agents (lazy init)
       const agentInstance = getAgent();
+      const routerInstance = getRouterAgent();
       if (!agentInstance) {
          return res.status(503).json({ error: 'Agent service unavailable - OPENROUTER_API_KEY not configured' });
       }
@@ -82,21 +100,66 @@ router.post('/', async (req, res) => {
          chatId = `chat-${uuidv4()}`;
       }
 
-      // NOTE: Don't save user message here - the image generation tools save their own messages
-      // Only save user message for non-image tools (conversation, schedule, etc.)
+      // Get chat history for context
+      const history = await ImageMessage.find({ imageChatId: chatId })
+         .sort({ createdAt: 1 })
+         .limit(10)
+         .lean();
 
+      // STEP 1: Router Agent classifies intent first
+      let routerResult = null;
+      if (routerInstance) {
+         routerResult = await routerInstance.classify(message, { history, lastImageUrl, referenceImages });
+         console.log('🔀 [AGENT ROUTE] Router result:', JSON.stringify(routerResult));
+
+         // Log intent classification
+         Telemetry.logIntent(userId, message, routerResult.intent, routerResult.confidence, routerResult.needsClarification);
+
+         // If router needs clarification, respond early without calling main agent
+         if (routerResult.needsClarification) {
+            const clarificationMsg = routerInstance.getClarificationQuestion(routerResult.intent, routerResult.reason);
+            await saveMessage(chatId, userId, 'user', message);
+            await saveMessage(chatId, userId, 'assistant', clarificationMsg);
+
+            // Log clarification event
+            Telemetry.logClarification(userId, message, clarificationMsg, routerResult.intent);
+
+            return res.status(200).json({
+               message: clarificationMsg,
+               imageChatId: chatId,
+               intent: 'clarification',
+               routerIntent: routerResult.intent,
+               confidence: routerResult.confidence
+            });
+         }
+      }
+
+      // STEP 2: Main agent processes the request (router already validated intent)
       const result = await agentInstance.run({
          userId,
          chatId,
          message,
          referenceImages: referenceImages || [],
-         lastImageUrl
+         lastImageUrl,
+         routerIntent: routerResult?.intent // Pass router's classification to main agent
       });
 
       if (!result.success) {
          const errorMsg = result.message || 'Something went wrong';
          await saveMessage(chatId, userId, 'assistant', errorMsg);
+
+         // Log failure with FailureHandler
+         const failure = FailureHandler.fromError({ message: errorMsg });
+         Telemetry.logFailure(userId, failure.code, failure.code, failure.action, message);
+
          return res.status(200).json({ message: errorMsg, imageChatId: chatId, intent: 'error' });
+      }
+
+      // Handle finalAnswer (conversation) - when agent responds without using a tool
+      if (result.message && !result.result) {
+         await saveMessage(chatId, userId, 'user', message);
+         await saveMessage(chatId, userId, 'assistant', result.message);
+         return res.status(200).json({ message: result.message, imageChatId: chatId, intent: 'conversation' });
       }
 
       const toolResult = result.result || {};
@@ -158,7 +221,67 @@ router.post('/', async (req, res) => {
 
    } catch (error) {
       console.error('❌ [AGENT ROUTE] Error:', error.message);
-      res.status(500).json({ error: error.message });
+
+      // Log system failure
+      const { userId } = req.body;
+      const failure = FailureHandler.fromError(error);
+      Telemetry.logFailure(userId, 'SYSTEM_ERROR', failure.code, failure.action, error.message);
+
+      res.status(500).json({ error: failure.message });
+   }
+});
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━
+// FEEDBACK ENDPOINT
+// ━━━━━━━━━━━━━━━━━━━━━━
+router.post('/feedback', async (req, res) => {
+   try {
+      const { userId, chatId, messageId, rating, comment } = req.body;
+
+      if (!userId || !rating) {
+         return res.status(400).json({ error: 'userId and rating are required' });
+      }
+
+      await Telemetry.logFeedback(userId, chatId, messageId, rating, comment);
+      await Telemetry.flush(); // Ensure feedback is saved immediately
+
+      res.status(200).json({ success: true, message: 'Feedback recorded' });
+   } catch (error) {
+      console.error('❌ [FEEDBACK] Error:', error.message);
+      res.status(500).json({ error: 'Failed to record feedback' });
+   }
+});
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━
+// TELEMETRY STATS ENDPOINT
+// ━━━━━━━━━━━━━━━━━━━━━━
+router.get('/stats', async (req, res) => {
+   try {
+      const stats = await Telemetry.getWeeklyStats();
+      res.status(200).json(stats);
+   } catch (error) {
+      console.error('❌ [STATS] Error:', error.message);
+      res.status(500).json({ error: 'Failed to get stats' });
+   }
+});
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━
+// PLATFORM DEFAULTS ENDPOINT
+// ━━━━━━━━━━━━━━━━━━━━━━
+router.get('/platforms', async (req, res) => {
+   try {
+      const platforms = PlatformDefaults.getAllPlatforms();
+      const defaults = {};
+      for (const p of platforms) {
+         defaults[p] = PlatformDefaults.get(p);
+      }
+      res.status(200).json(defaults);
+   } catch (error) {
+      console.error('❌ [PLATFORMS] Error:', error.message);
+      res.status(500).json({ error: 'Failed to get platform defaults' });
    }
 });
 
