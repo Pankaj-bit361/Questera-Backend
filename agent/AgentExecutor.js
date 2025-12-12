@@ -67,7 +67,13 @@ RULES:
          if (response.tool) {
             const toolResult = await this.executeTool(response.tool, response.params, context);
 
-            if (toolResult.success) {
+            // Check if this is a multi-step workflow (generate_and_post)
+            const isMultiStep = context.routerIntent === 'generate_and_post';
+            const isGenerateStep = response.tool === 'generate_image';
+            const shouldContinue = isMultiStep && isGenerateStep && toolResult.success;
+
+            if (toolResult.success && !shouldContinue) {
+               // Single action complete - return result
                return {
                   success: true,
                   result: toolResult,
@@ -76,6 +82,28 @@ RULES:
                };
             }
 
+            if (toolResult.success && shouldContinue) {
+               // Multi-step: image generated, now continue to post
+               console.log('🔗 [EXECUTOR] Multi-step workflow: image generated, continuing to post...');
+
+               messages.push({
+                  role: 'assistant',
+                  content: JSON.stringify(response)
+               });
+
+               // Store the generated image URL for the next step
+               const imageUrl = toolResult.data?.images?.[0] || toolResult.data?.imageUrl;
+               context.generatedImageUrl = imageUrl;
+
+               messages.push({
+                  role: 'user',
+                  content: `Image generated successfully: ${imageUrl}. Now proceed to post this image to the user's Instagram as requested. Use the schedule_post tool.`
+               });
+
+               continue;
+            }
+
+            // Tool failed - add to messages and retry
             messages.push({
                role: 'assistant',
                content: JSON.stringify(response)

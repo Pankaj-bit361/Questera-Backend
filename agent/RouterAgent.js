@@ -13,6 +13,7 @@ INTENTS (EXACT VALUES)
 - generate_image
 - edit_image
 - schedule_post
+- generate_and_post (compound: create image + post to social media)
 - chat
 
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -21,8 +22,8 @@ CLASSIFICATION RULES
 - If the user explicitly says: create, generate, make an image → generate_image
 - If the user explicitly says: edit, change, modify, replace → edit_image
 - If the user explicitly says: post, publish, schedule → schedule_post
+- If user says BOTH create/generate AND post/publish → generate_and_post
 - Short conversational replies ("yes", "ok", "sure", "thanks", "hey", "hello", "hi") → chat
-- If multiple intents appear → choose the PRIMARY intent
 - If intent is unclear → needs_clarification = true
 - NEVER guess intent
 
@@ -32,7 +33,7 @@ OUTPUT FORMAT (JSON ONLY)
 Return ONLY this JSON. No text. No markdown.
 
 {
-  "intent": "generate_image | edit_image | schedule_post | chat",
+  "intent": "generate_image | edit_image | schedule_post | generate_and_post | chat",
   "confidence": 0.0,
   "needs_clarification": false,
   "reason": "short explanation"
@@ -74,7 +75,7 @@ class RouterAgent {
       console.log('🔀 [ROUTER] Classification result:', JSON.stringify(result));
 
       // Validate intent
-      const validIntents = ['generate_image', 'edit_image', 'schedule_post', 'chat'];
+      const validIntents = ['generate_image', 'edit_image', 'schedule_post', 'generate_and_post', 'chat'];
       if (!validIntents.includes(result.intent)) {
          console.warn('⚠️ [ROUTER] Invalid intent, defaulting to chat:', result.intent);
          result.intent = 'chat';

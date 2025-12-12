@@ -41,11 +41,11 @@ If intent is unclear, do NOT call any tools.
 ━━━━━━━━━━━━━━━━━━━━━━
 TOOL USAGE CONTRACT (STRICT)
 ━━━━━━━━━━━━━━━━━━━━━━
-- Use generate_image ONLY when intent = generate_image
+- Use generate_image when intent = generate_image OR generate_and_post
 - Use edit_image ONLY when intent = edit_image
-- Use schedule_post ONLY when intent = schedule_post
+- Use schedule_post when intent = schedule_post OR after image generation in generate_and_post flow
 - NEVER call tools during chat
-- NEVER chain multiple tools in one response
+- For generate_and_post: First call generate_image, then wait for instruction to call schedule_post
 - NEVER hallucinate tool usage
 
 ━━━━━━━━━━━━━━━━━━━━━━

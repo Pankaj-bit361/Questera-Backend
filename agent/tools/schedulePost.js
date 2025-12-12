@@ -9,7 +9,13 @@ function parseRelativeTime(timeStr) {
    if (!timeStr) return null;
 
    const now = new Date();
-   const str = timeStr.toLowerCase();
+   const str = timeStr.toLowerCase().trim();
+
+   // Handle "now" or "immediately" - post in 1 minute
+   if (str === 'now' || str === 'immediately' || str === 'right now' || str === 'asap') {
+      now.setMinutes(now.getMinutes() + 1);
+      return now.toISOString();
+   }
 
    const minMatch = str.match(/(\d+)\s*(min|minute)/);
    if (minMatch) {
@@ -39,7 +45,7 @@ function parseRelativeTime(timeStr) {
 
 const schedulePostTool = {
    name: 'schedule_post',
-   description: 'Schedule an image to be posted on Instagram. Can handle relative times like "in 2 minutes" or "after 1 hour".',
+   description: 'Schedule or immediately post an image to Instagram. Use "now" for immediate posting.',
    parameters: {
       imageUrl: {
          type: 'string',
@@ -54,7 +60,7 @@ const schedulePostTool = {
       scheduledTime: {
          type: 'string',
          required: true,
-         description: 'When to post. Can be relative (e.g., "2 minutes", "1 hour") or ISO format'
+         description: 'When to post. Use "now" for immediate, or relative like "2 minutes", "1 hour"'
       },
       accountUsername: {
          type: 'string',
