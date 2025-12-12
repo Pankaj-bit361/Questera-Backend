@@ -17,14 +17,16 @@ INTENTS (EXACT VALUES)
 - chat
 
 ━━━━━━━━━━━━━━━━━━━━━━
-CLASSIFICATION RULES
+CLASSIFICATION RULES (PRIORITY ORDER)
 ━━━━━━━━━━━━━━━━━━━━━━
-- If the user explicitly says: create, generate, make an image → generate_image
-- If the user explicitly says: edit, change, modify, replace → edit_image
-- If the user explicitly says: post, publish, schedule → schedule_post
-- If user says BOTH create/generate AND post/publish → generate_and_post
-- Short conversational replies ("yes", "ok", "sure", "thanks", "hey", "hello", "hi") → chat
-- If intent is unclear → needs_clarification = true
+1. COMPOUND ACTIONS FIRST: If user says BOTH (create/generate/make image) AND (post/publish/schedule/instagram) → generate_and_post
+   Examples: "create an image and post it", "make a superman image and post to instagram", "generate image and schedule it"
+2. If user ONLY says: create, generate, make an image (NO posting mentioned) → generate_image
+3. If user ONLY says: edit, change, modify, replace → edit_image
+4. If user ONLY says: post, publish, schedule (image already exists) → schedule_post
+5. Short conversational replies ("yes", "ok", "sure", "thanks", "hey", "hello", "hi") → chat
+6. If intent is unclear → needs_clarification = true
+- NEVER ignore the "post" part of a compound request
 - NEVER guess intent
 
 ━━━━━━━━━━━━━━━━━━━━━━
