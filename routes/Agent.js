@@ -6,7 +6,18 @@ const Image = require('../models/image');
 const { v4: uuidv4 } = require('uuid');
 
 
-const agent = createImageAgent();
+// Lazy initialize agent to avoid startup failures if API key is missing
+let agent = null;
+function getAgent() {
+   if (!agent) {
+      if (!process.env.OPENROUTER_API_KEY) {
+         console.warn('⚠️ [AGENT] OPENROUTER_API_KEY not set - agent disabled');
+         return null;
+      }
+      agent = createImageAgent();
+   }
+   return agent;
+}
 
 // Helper to save a message and link it to the Image document
 async function saveMessage(chatId, userId, role, content, images = []) {
@@ -59,6 +70,12 @@ router.post('/', async (req, res) => {
       console.log('🖼️ [AGENT ROUTE] Last Image URL:', lastImageUrl || 'none');
       console.log('💬 [AGENT ROUTE] Message:', message);
 
+      // Get agent (lazy init)
+      const agentInstance = getAgent();
+      if (!agentInstance) {
+         return res.status(503).json({ error: 'Agent service unavailable - OPENROUTER_API_KEY not configured' });
+      }
+
       // Generate chatId if not provided
       let chatId = imageChatId;
       if (!chatId) {
@@ -68,7 +85,7 @@ router.post('/', async (req, res) => {
       // NOTE: Don't save user message here - the image generation tools save their own messages
       // Only save user message for non-image tools (conversation, schedule, etc.)
 
-      const result = await agent.run({
+      const result = await agentInstance.run({
          userId,
          chatId,
          message,
