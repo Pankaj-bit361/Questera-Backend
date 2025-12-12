@@ -36,37 +36,22 @@ const editImageTool = {
 
       let imagesToEdit = [];
 
-      // PRIORITY: Always use lastImageUrl or imageUrl as the PRIMARY image to edit
-      // Then ADD any referenceImages as additional context (e.g., showing what user wants)
+      // PRIORITY ORDER:
+      // 1. If user uploaded referenceImages → Use ONLY those (user explicitly chose what to edit)
+      // 2. If NO referenceImages → Use lastImageUrl (user said "edit this" without uploading)
 
-      const primaryImageUrl = imageUrl || lastImageUrl;
-
-      if (primaryImageUrl) {
-         console.log('🖼️ [EDIT_IMAGE] Primary image to edit:', primaryImageUrl);
-         imagesToEdit.push({ data: primaryImageUrl, mimeType: 'image/jpeg' });
-      }
-
-      // Add any reference images as additional context (but skip duplicates of primaryImageUrl)
       if (referenceImages && referenceImages.length > 0) {
-         // Filter out reference images that are duplicates of the primary image
-         const uniqueRefs = referenceImages.filter(ref => {
-            // Skip if the reference data equals the primary image URL
-            if (ref.data === primaryImageUrl) {
-               console.log('🖼️ [EDIT_IMAGE] Skipping duplicate reference image (same as primary)');
-               return false;
-            }
-            return true;
-         });
-         if (uniqueRefs.length > 0) {
-            console.log('🖼️ [EDIT_IMAGE] Adding', uniqueRefs.length, 'unique reference images as context');
-            imagesToEdit = [...imagesToEdit, ...uniqueRefs];
-         }
-      }
-
-      // Fallback: If no primary image but have reference images, use those
-      if (imagesToEdit.length === 0 && referenceImages && referenceImages.length > 0) {
-         console.log('🖼️ [EDIT_IMAGE] No primary image, using referenceImages only');
+         // User uploaded reference images - use ONLY those, ignore lastImageUrl
+         console.log('🖼️ [EDIT_IMAGE] User provided', referenceImages.length, 'reference images - using those');
          imagesToEdit = referenceImages;
+      } else if (imageUrl) {
+         // Agent specified a specific URL to edit
+         console.log('🖼️ [EDIT_IMAGE] Using agent-specified imageUrl:', imageUrl);
+         imagesToEdit.push({ data: imageUrl, mimeType: 'image/jpeg' });
+      } else if (lastImageUrl) {
+         // No reference images, use the last generated image
+         console.log('🖼️ [EDIT_IMAGE] No reference images, using lastImageUrl:', lastImageUrl);
+         imagesToEdit.push({ data: lastImageUrl, mimeType: 'image/jpeg' });
       }
 
       console.log('🖼️ [EDIT_IMAGE] Final imagesToEdit count:', imagesToEdit.length);
