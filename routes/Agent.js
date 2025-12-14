@@ -164,6 +164,9 @@ router.post('/', async (req, res) => {
 
       const toolResult = result.result || {};
 
+      // Extract cognitive layer from result (thinking steps, decisions, suggestions)
+      const cognitive = result.cognitive || toolResult.cognitive || null;
+
       // Image generation - messages already saved by imageController
       if (toolResult.imageUrl) {
          return res.status(200).json({
@@ -172,7 +175,9 @@ router.post('/', async (req, res) => {
             images: toolResult.images,
             imageChatId: toolResult.imageChatId || chatId,
             creditsRemaining: toolResult.creditsRemaining,
-            intent: 'image_generation'
+            intent: 'image_generation',
+            // Cognitive Layer - makes the agent feel smart
+            cognitive
          });
       }
 
@@ -180,7 +185,7 @@ router.post('/', async (req, res) => {
       if (toolResult.type === 'text' && toolResult.message) {
          await saveMessage(chatId, userId, 'user', message); // Save user message for non-image tools
          await saveMessage(chatId, userId, 'assistant', toolResult.message);
-         return res.status(200).json({ message: toolResult.message, imageChatId: chatId, intent: 'conversation' });
+         return res.status(200).json({ message: toolResult.message, imageChatId: chatId, intent: 'conversation', cognitive });
       }
 
       // Schedule post - save user + assistant message
@@ -188,7 +193,13 @@ router.post('/', async (req, res) => {
          await saveMessage(chatId, userId, 'user', message); // Save user message for non-image tools
          const scheduleMsg = toolResult.message || `Post scheduled for ${toolResult.scheduledAt}`;
          await saveMessage(chatId, userId, 'assistant', scheduleMsg);
-         return res.status(200).json({ message: scheduleMsg, postId: toolResult.postId, imageChatId: chatId, intent: 'schedule' });
+         return res.status(200).json({
+            message: scheduleMsg,
+            postId: toolResult.postId,
+            imageChatId: chatId,
+            intent: 'schedule',
+            cognitive
+         });
       }
 
       // Accounts list - save user + assistant message
@@ -196,7 +207,7 @@ router.post('/', async (req, res) => {
          await saveMessage(chatId, userId, 'user', message); // Save user message for non-image tools
          const accountsMsg = toolResult.message || `Found ${toolResult.count} account(s)`;
          await saveMessage(chatId, userId, 'assistant', accountsMsg);
-         return res.status(200).json({ message: accountsMsg, accounts: toolResult.accounts, imageChatId: chatId, intent: 'accounts' });
+         return res.status(200).json({ message: accountsMsg, accounts: toolResult.accounts, imageChatId: chatId, intent: 'accounts', cognitive });
       }
 
       // Variations - messages already saved by createVariations tool
@@ -209,7 +220,8 @@ router.post('/', async (req, res) => {
             images: variationImages,
             imageChatId: toolResult.imageChatId || chatId,
             creditsRemaining: toolResult.creditsRemaining,
-            intent: 'variations'
+            intent: 'variations',
+            cognitive
          });
       }
 
@@ -217,7 +229,7 @@ router.post('/', async (req, res) => {
       await saveMessage(chatId, userId, 'user', message);
       const fallbackMsg = toolResult.message || 'Done';
       await saveMessage(chatId, userId, 'assistant', fallbackMsg);
-      return res.status(200).json({ message: fallbackMsg, imageChatId: chatId, intent: result.toolUsed || 'unknown' });
+      return res.status(200).json({ message: fallbackMsg, imageChatId: chatId, intent: result.toolUsed || 'unknown', cognitive });
 
    } catch (error) {
       console.error('❌ [AGENT ROUTE] Error:', error.message);

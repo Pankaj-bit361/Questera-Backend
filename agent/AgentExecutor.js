@@ -78,12 +78,15 @@ RULES:
             const shouldContinueToGenerate = isWebsiteContent && isExtractStep && toolResult.success;
 
             if (toolResult.success && !shouldContinueToPost && !shouldContinueToGenerate) {
-               // Single action complete - return result
+               // Single action complete - return result with cognitive layer
                return {
                   success: true,
                   result: toolResult,
                   toolUsed: response.tool,
-                  iterations
+                  thought: response.thought,
+                  iterations,
+                  // Pass through cognitive layer from tool
+                  cognitive: toolResult.cognitive || null
                };
             }
 

@@ -18,7 +18,8 @@ class InstagramController {
 
       // Facebook OAuth scopes for Instagram Business
       // Added business_management to access Business Portfolio assets
-      const scope = 'pages_show_list,instagram_basic,instagram_manage_comments,instagram_content_publish,pages_read_engagement,business_management';
+      // Added instagram_manage_insights for analytics (impressions, reach, engagement, saves)
+      const scope = 'pages_show_list,instagram_basic,instagram_manage_comments,instagram_content_publish,pages_read_engagement,business_management,instagram_manage_insights';
 
       // Use Facebook OAuth dialog
       const oauthUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth?` +
@@ -509,12 +510,27 @@ class InstagramController {
 
       console.log('✅ [INSTAGRAM] Image published! Media ID:', publishData.id);
 
+      // Fetch the permalink for the published media
+      let permalink = null;
+      try {
+        const mediaInfoUrl = `https://graph.facebook.com/${this.apiVersion}/${publishData.id}?fields=permalink&access_token=${accessToken}`;
+        const mediaInfoResponse = await fetch(mediaInfoUrl);
+        const mediaInfo = await mediaInfoResponse.json();
+        if (mediaInfo.permalink) {
+          permalink = mediaInfo.permalink;
+          console.log('✅ [INSTAGRAM] Permalink:', permalink);
+        }
+      } catch (e) {
+        console.log('⚠️ [INSTAGRAM] Could not fetch permalink:', e.message);
+      }
+
       return {
         status: 200,
         json: {
           success: true,
           message: 'Image published to Instagram!',
           mediaId: publishData.id,
+          permalink: permalink,
           username: instagramUsername,
         },
       };

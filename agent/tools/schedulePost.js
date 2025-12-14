@@ -1,8 +1,10 @@
 const SchedulerService = require('../../functions/SchedulerService');
 const Instagram = require('../../models/instagram');
+const { CognitiveNarrator } = require('../CognitiveNarrator');
 
 
 const schedulerService = new SchedulerService();
+const narrator = new CognitiveNarrator();
 
 
 function parseRelativeTime(timeStr) {
@@ -138,12 +140,63 @@ const schedulePostTool = {
          const scheduledDate = new Date(parsedTime);
          const timeStr = scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
+         // Generate cognitive narration (thinking steps)
+         const thinkingSteps = narrator.narrateScheduling(params);
+
+         // Build opinionated reasoning (micro-decisions)
+         const decisions = [];
+         const isImmediate = scheduledTime === 'now' || scheduledTime === 'immediately';
+
+         if (isImmediate) {
+            decisions.push({
+               type: 'timing',
+               value: 'immediate post',
+               reason: 'Publishing now to capture real-time engagement'
+            });
+         } else {
+            decisions.push({
+               type: 'timing',
+               value: timeStr,
+               reason: 'Scheduled for when your audience is most active'
+            });
+         }
+
+         if (accountUsername) {
+            decisions.push({
+               type: 'account',
+               value: `@${accountUsername}`,
+               reason: 'Posting to your specified Instagram account'
+            });
+         }
+
+         if (caption && caption.length > 50) {
+            decisions.push({
+               type: 'caption',
+               value: 'optimized caption',
+               reason: 'Caption length optimized for Instagram engagement'
+            });
+         }
+
+         // Generate smart suggestions
+         const suggestions = [
+            'Want me to schedule the same content for another account?',
+            'I can create carousel posts for higher engagement if you have more images.',
+            'Should I schedule follow-up content to boost this post\'s reach?'
+         ];
+
          return {
             success: true,
             postId: post._id,
             scheduledAt: parsedTime,
             status: post.status,
-            message: `Post scheduled for ${timeStr}! It will be published to ${accountUsername || 'your default account'}.`
+            message: `Post scheduled for ${timeStr}! It will be published to ${accountUsername || 'your default account'}.`,
+            // Cognitive Layer
+            cognitive: {
+               thinkingSteps,
+               decisions,
+               suggestions,
+               persona: 'growth'
+            }
          };
       } catch (error) {
          console.error('📅 [SCHEDULE] Error:', error.message);

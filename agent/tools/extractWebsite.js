@@ -1,6 +1,8 @@
 const WebsiteExtractor = require('../WebsiteExtractor');
+const { CognitiveNarrator } = require('../CognitiveNarrator');
 
 const extractor = new WebsiteExtractor();
+const narrator = new CognitiveNarrator();
 
 const extractWebsiteTool = {
    name: 'extract_website',
@@ -22,6 +24,9 @@ const extractWebsiteTool = {
          return { success: false, error: 'URL is required' };
       }
 
+      // Generate cognitive narration (thinking steps)
+      const thinkingSteps = narrator.narrateWebsiteExtraction(params);
+
       const result = await extractor.extract(url);
 
       if (!result.success) {
@@ -30,6 +35,40 @@ const extractWebsiteTool = {
             error: result.error || 'Failed to extract website content'
          };
       }
+
+      // Build opinionated reasoning (micro-decisions)
+      const decisions = [];
+
+      if (result.data.title) {
+         decisions.push({
+            type: 'brand',
+            value: result.data.title,
+            reason: 'Identified your brand name for consistent messaging'
+         });
+      }
+
+      if (result.data.metaDescription || result.data.ogDescription) {
+         decisions.push({
+            type: 'positioning',
+            value: 'brand voice captured',
+            reason: 'Extracted your unique value proposition for authentic content'
+         });
+      }
+
+      if (result.data.keyBullets?.length > 0) {
+         decisions.push({
+            type: 'features',
+            value: `${result.data.keyBullets.length} key points`,
+            reason: 'Captured your main selling points to highlight in visuals'
+         });
+      }
+
+      // Generate smart suggestions
+      const suggestions = [
+         'Ready to create branded visuals based on your website.',
+         'I can generate social media content that matches your brand voice.',
+         'Want me to create images featuring your key product benefits?'
+      ];
 
       // Return structured data for LLM context
       return {
@@ -44,7 +83,14 @@ const extractWebsiteTool = {
             keyPoints: result.data.keyBullets,
             summary: result.data.summary
          },
-         message: `Extracted content from ${result.data.title || url}. Use this to create relevant content.`
+         message: `Extracted content from ${result.data.title || url}. Use this to create relevant content.`,
+         // Cognitive Layer
+         cognitive: {
+            thinkingSteps,
+            decisions,
+            suggestions,
+            persona: 'researcher'
+         }
       };
    }
 };

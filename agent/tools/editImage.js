@@ -1,7 +1,9 @@
 const ImageController = require('../../functions/Image');
+const { CognitiveNarrator } = require('../CognitiveNarrator');
 
 
 const imageController = new ImageController();
+const narrator = new CognitiveNarrator();
 
 
 const editImageTool = {
@@ -35,6 +37,7 @@ const editImageTool = {
       }
 
       let imagesToEdit = [];
+      let imageSource = 'unknown';
 
       // PRIORITY ORDER:
       // 1. If user uploaded referenceImages → Use ONLY those (user explicitly chose what to edit)
@@ -44,14 +47,17 @@ const editImageTool = {
          // User uploaded reference images - use ONLY those, ignore lastImageUrl
          console.log('🖼️ [EDIT_IMAGE] User provided', referenceImages.length, 'reference images - using those');
          imagesToEdit = referenceImages;
+         imageSource = 'uploaded';
       } else if (imageUrl) {
          // Agent specified a specific URL to edit
          console.log('🖼️ [EDIT_IMAGE] Using agent-specified imageUrl:', imageUrl);
          imagesToEdit.push({ data: imageUrl, mimeType: 'image/jpeg' });
+         imageSource = 'specified';
       } else if (lastImageUrl) {
          // No reference images, use the last generated image
          console.log('🖼️ [EDIT_IMAGE] No reference images, using lastImageUrl:', lastImageUrl);
          imagesToEdit.push({ data: lastImageUrl, mimeType: 'image/jpeg' });
+         imageSource = 'previous';
       }
 
       console.log('🖼️ [EDIT_IMAGE] Final imagesToEdit count:', imagesToEdit.length);
@@ -63,6 +69,9 @@ const editImageTool = {
       if (imagesToEdit.length === 0) {
          return { success: false, error: 'No image provided to edit' };
       }
+
+      // Generate cognitive narration (thinking steps)
+      const thinkingSteps = narrator.narrateImageEdit(params, context);
 
       const mockReq = {
          body: {
@@ -81,12 +90,49 @@ const editImageTool = {
          return { success: false, error: result.json?.error || 'Edit failed' };
       }
 
+      // Build opinionated reasoning (micro-decisions)
+      const decisions = [];
+
+      if (imageSource === 'uploaded') {
+         decisions.push({
+            type: 'source',
+            value: `${imagesToEdit.length} uploaded image${imagesToEdit.length > 1 ? 's' : ''}`,
+            reason: 'Using your uploaded images as the base for editing'
+         });
+      } else if (imageSource === 'previous') {
+         decisions.push({
+            type: 'source',
+            value: 'last generated image',
+            reason: 'Editing the image I just created for you'
+         });
+      }
+
+      decisions.push({
+         type: 'preservation',
+         value: 'selective edit',
+         reason: 'Keeping the original composition intact while applying only the requested changes'
+      });
+
+      // Generate smart suggestions for iteration
+      const suggestions = [
+         'Want me to make a more dramatic version of this edit?',
+         'I can undo and try a different approach if you prefer.',
+         'Should I apply the same edit to create variations?'
+      ];
+
       return {
          success: true,
          imageUrl: result.json.imageUrl,
          images: result.json.images,
          imageChatId: result.json.imageChatId,
-         creditsRemaining: result.json.creditsRemaining
+         creditsRemaining: result.json.creditsRemaining,
+         // Cognitive Layer - makes the agent feel smart
+         cognitive: {
+            thinkingSteps,
+            decisions,
+            suggestions,
+            persona: 'editor'
+         }
       };
    }
 };

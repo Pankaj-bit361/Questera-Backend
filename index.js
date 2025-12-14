@@ -14,10 +14,12 @@ const liveGenRouter = require('./routes/LiveGeneration');
 const analyticsRouter = require('./routes/Analytics');
 const viralRouter = require('./routes/ViralContent');
 const agentRouter = require('./routes/Agent');
+const autopilotRouter = require('./routes/Autopilot');
 const authMiddleware = require('./middlewares/auth');
 const connectDB = require('./db');
 const SchedulerController = require('./functions/Scheduler');
 const LiveGenerationService = require('./functions/LiveGenerationService');
+const AutopilotService = require('./functions/AutopilotService');
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -53,6 +55,7 @@ app.use('/api/live-generation', liveGenRouter); // Live Generation + Auto-Post
 app.use('/api/analytics', analyticsRouter); // Analytics Dashboard
 app.use('/api/viral', viralRouter); // Viral Content Extraction
 app.use('/api/agent', agentRouter); // AI Agent
+app.use('/api/autopilot', autopilotRouter); // Autopilot System
 
 // Database connection and Server Start
 const startServer = async () => {
@@ -76,11 +79,15 @@ const startServer = async () => {
 const startSchedulerCron = () => {
     const scheduler = new SchedulerController();
     const liveGenService = new LiveGenerationService();
+    const autopilotService = new AutopilotService();
     const CRON_INTERVAL = 60 * 1000; // 1 minute
+    const AUTOPILOT_INTERVAL = 60 * 60 * 1000; // 1 hour (check hourly, run daily)
 
     console.log('📅 [CRON] Scheduler cron job started - checking every minute');
     console.log('🔄 [CRON] Live generation cron job started - checking every minute');
+    console.log('🤖 [CRON] Autopilot cron job started - checking every hour');
 
+    // Every minute cron
     setInterval(async () => {
         try {
             // Process scheduled posts
@@ -98,6 +105,26 @@ const startSchedulerCron = () => {
             console.error('❌ [CRON] Cron error:', error);
         }
     }, CRON_INTERVAL);
+
+    // Autopilot daily cron (runs at 8 AM check)
+    let lastAutopilotRun = null;
+    setInterval(async () => {
+        try {
+            const now = new Date();
+            const hour = now.getHours();
+            const today = now.toDateString();
+
+            // Run autopilot once per day at 8 AM
+            if (hour === 8 && lastAutopilotRun !== today) {
+                console.log('🤖 [AUTOPILOT] Starting daily autopilot run...');
+                const results = await autopilotService.runDailyAutopilot();
+                console.log(`🤖 [AUTOPILOT] Completed. Processed ${results.length} accounts`);
+                lastAutopilotRun = today;
+            }
+        } catch (error) {
+            console.error('❌ [AUTOPILOT] Cron error:', error);
+        }
+    }, AUTOPILOT_INTERVAL);
 };
 
 startServer();

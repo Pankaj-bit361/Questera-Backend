@@ -1,7 +1,9 @@
 const ImageController = require('../../functions/Image');
+const { CognitiveNarrator, ASPECT_RATIO_REASONS, STYLE_REASONS } = require('../CognitiveNarrator');
 
 
 const imageController = new ImageController();
+const narrator = new CognitiveNarrator();
 
 
 const generateImageTool = {
@@ -54,6 +56,9 @@ const generateImageTool = {
 
       console.log('🖼️ [GENERATE_IMAGE] Final images count:', imagesToUse.length);
 
+      // Generate cognitive narration (thinking steps)
+      const thinkingSteps = narrator.narrateImageGeneration(params, context);
+
       const mockReq = {
          body: {
             prompt,
@@ -72,12 +77,53 @@ const generateImageTool = {
          return { success: false, error: result.json?.error || 'Generation failed' };
       }
 
+      // Build opinionated reasoning (micro-decisions)
+      const decisions = [];
+
+      if (aspectRatio) {
+         const reason = ASPECT_RATIO_REASONS[aspectRatio];
+         if (reason) {
+            decisions.push({ type: 'aspectRatio', value: aspectRatio, reason });
+         }
+      }
+
+      if (style) {
+         const reason = STYLE_REASONS[style.toLowerCase()];
+         if (reason) {
+            decisions.push({ type: 'style', value: style, reason });
+         } else {
+            decisions.push({ type: 'style', value: style, reason: `Applied ${style} style for distinctive visual character` });
+         }
+      }
+
+      if (imagesToUse.length > 0) {
+         decisions.push({
+            type: 'reference',
+            value: `${imagesToUse.length} image${imagesToUse.length > 1 ? 's' : ''}`,
+            reason: 'Used your reference for face/style consistency'
+         });
+      }
+
+      // Generate smart suggestions for iteration
+      const suggestions = [
+         'Want me to try a bolder, more vibrant version?',
+         'I can create a more minimal composition if you prefer.',
+         'Should I add text overlay for marketing use?'
+      ];
+
       return {
          success: true,
          imageUrl: result.json.imageUrl,
          images: result.json.images,
          imageChatId: result.json.imageChatId,
-         creditsRemaining: result.json.creditsRemaining
+         creditsRemaining: result.json.creditsRemaining,
+         // Cognitive Layer - makes the agent feel smart
+         cognitive: {
+            thinkingSteps,
+            decisions,
+            suggestions,
+            persona: 'creative'
+         }
       };
    }
 };

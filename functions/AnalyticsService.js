@@ -255,54 +255,166 @@ class AnalyticsService {
    */
   async refreshEngagement(userId) {
     const Instagram = require('../models/instagram');
+    const SocialAccount = require('../models/socialAccount');
 
-    // Get user's Instagram credentials
-    const instagram = await Instagram.findOne({ userId, isConnected: true });
-    if (!instagram) {
-      throw new Error('Instagram not connected');
+    // Try to find Instagram connection - check both models for backward compatibility
+    let accessToken = null;
+
+    // First try the Instagram model (primary connection)
+    const instagramAccount = await Instagram.findOne({ userId, isConnected: true });
+    if (instagramAccount?.accessToken) {
+      accessToken = instagramAccount.accessToken;
+      console.log('[ANALYTICS] Found Instagram connection via Instagram model');
     }
 
-    // Get recent published posts
-    const posts = await ScheduledPost.find({
-      userId,
-      status: 'published',
-      publishedMediaId: { $exists: true },
-      publishedAt: { $gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) }, // Last 7 days
-    });
-
-    const updated = [];
-    for (const post of posts) {
-      try {
-        // Fetch insights from Instagram
-        const insightsUrl = `https://graph.facebook.com/v20.0/${post.publishedMediaId}/insights?` +
-          `metric=engagement,impressions,reach,saved&access_token=${instagram.accessToken}`;
-
-        const response = await fetch(insightsUrl);
-        const data = await response.json();
-
-        if (data.data) {
-          const metrics = {};
-          data.data.forEach(m => {
-            metrics[m.name] = m.values?.[0]?.value || 0;
-          });
-
-          post.engagement = {
-            ...post.engagement,
-            likes: metrics.engagement || post.engagement?.likes,
-            reach: metrics.reach,
-            impressions: metrics.impressions,
-            saves: metrics.saved,
-            lastUpdated: new Date(),
-          };
-          await post.save();
-          updated.push(post.postId);
-        }
-      } catch (error) {
-        console.error(`Failed to refresh engagement for ${post.postId}:`, error);
+    // Fallback to SocialAccount model
+    if (!accessToken) {
+      const socialAccount = await SocialAccount.findOne({
+        userId,
+        platform: 'instagram',
+        isActive: true
+      });
+      if (socialAccount) {
+        accessToken = socialAccount.facebookPageAccessToken || socialAccount.accessToken;
+        console.log('[ANALYTICS] Found Instagram connection via SocialAccount model');
       }
     }
 
-    return { updated: updated.length, postIds: updated };
+    if (!accessToken) {
+      throw new Error('Instagram not connected. Please connect your Instagram account in Settings.');
+    }
+
+    // NEW APPROACH: Fetch all recent media directly from Instagram account
+    // This fixes the issue where stored publishedMediaId might be container IDs instead of actual media IDs
+    const igBusinessId = instagramAccount?.instagramBusinessAccountId;
+
+    if (!igBusinessId) {
+      throw new Error('Instagram Business Account ID not found');
+    }
+
+    console.log(`[ANALYTICS] Fetching media directly from Instagram account ${igBusinessId}`);
+
+    // Fetch recent media from Instagram (up to 50 posts)
+    const mediaListUrl = `https://graph.facebook.com/v20.0/${igBusinessId}/media?` +
+      `fields=id,caption,like_count,comments_count,permalink,timestamp,media_type&limit=50&access_token=${accessToken}`;
+
+    const mediaListResponse = await fetch(mediaListUrl);
+    const mediaListData = await mediaListResponse.json();
+
+    if (mediaListData.error) {
+      throw new Error(`Instagram API error: ${mediaListData.error.message}`);
+    }
+
+    const instagramMedia = mediaListData.data || [];
+    console.log(`[ANALYTICS] Found ${instagramMedia.length} posts on Instagram`);
+
+    // Get our published posts from database
+    const posts = await ScheduledPost.find({
+      userId,
+      status: 'published',
+      publishedAt: { $gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, // Last 30 days
+    });
+
+    console.log(`[ANALYTICS] Found ${posts.length} published posts in database`);
+
+    const updated = [];
+    const errors = [];
+
+    // Match each database post to Instagram media by permalink or timestamp (reliable methods only)
+    for (const post of posts) {
+      try {
+        // Find matching Instagram media
+        let igMedia = null;
+
+        // 1. First try matching by stored permalink (most reliable)
+        if (post.platformPostUrl) {
+          igMedia = instagramMedia.find(m => m.permalink === post.platformPostUrl);
+          if (igMedia) {
+            console.log(`[ANALYTICS] Matched ${post.postId} by permalink`);
+          }
+        }
+
+        // 2. Try matching by timestamp (within 5 minutes - very reliable)
+        if (!igMedia && post.publishedAt) {
+          const postTime = new Date(post.publishedAt).getTime();
+          igMedia = instagramMedia.find(m => {
+            if (!m.timestamp) return false;
+            const igTime = new Date(m.timestamp).getTime();
+            const diff = Math.abs(postTime - igTime);
+            return diff < 5 * 60 * 1000; // Within 5 minutes
+          });
+          if (igMedia) {
+            console.log(`[ANALYTICS] Matched ${post.postId} by timestamp (${post.publishedAt})`);
+          }
+        }
+
+        if (!igMedia) {
+          console.log(`[ANALYTICS] No match for ${post.postId} published at ${post.publishedAt}`);
+          continue;
+        }
+
+        // Update the publishedMediaId if it was wrong
+        if (post.publishedMediaId !== igMedia.id) {
+          console.log(`[ANALYTICS] Fixing mediaId for ${post.postId}: ${post.publishedMediaId} -> ${igMedia.id}`);
+          post.publishedMediaId = igMedia.id;
+          post.platformPostUrl = igMedia.permalink;
+        }
+
+        let likes = igMedia.like_count || 0;
+        let comments = igMedia.comments_count || 0;
+        let reach = 0;
+        let impressions = 0;
+        let saves = 0;
+
+        // Try to get insights - use v19 for impressions support or v20 with reach,saved only
+        // For images: reach, saved work. For reels/videos: plays, reach, saved
+        const mediaType = igMedia.media_type;
+        let metrics = 'reach,saved';
+        if (mediaType === 'VIDEO') {
+          metrics = 'plays,reach,saved';
+        }
+
+        const insightsUrl = `https://graph.facebook.com/v19.0/${igMedia.id}/insights?` +
+          `metric=${metrics}&access_token=${accessToken}`;
+
+        const insightsResponse = await fetch(insightsUrl);
+        const insightsData = await insightsResponse.json();
+
+        if (insightsData.error) {
+          // Insights may not be available for very recent posts (< 24 hours)
+          console.log(`[ANALYTICS] Insights unavailable for ${post.postId}`);
+        } else if (insightsData.data) {
+          insightsData.data.forEach(m => {
+            if (m.name === 'reach') reach = m.values?.[0]?.value || 0;
+            if (m.name === 'plays') impressions = m.values?.[0]?.value || 0; // Use plays as impressions for videos
+            if (m.name === 'saved') saves = m.values?.[0]?.value || 0;
+          });
+        }
+
+        post.engagement = {
+          likes,
+          comments,
+          reach,
+          impressions,
+          saves,
+          lastUpdated: new Date(),
+        };
+        await post.save();
+        updated.push(post.postId);
+
+        console.log(`[ANALYTICS] Updated ${post.postId}: ${likes} likes, ${comments} comments`);
+      } catch (error) {
+        console.error(`[ANALYTICS] Failed to refresh ${post.postId}:`, error.message);
+        errors.push({ postId: post.postId, error: error.message });
+      }
+    }
+
+    return {
+      updated: updated.length,
+      postIds: updated,
+      errors: errors.length,
+      total: posts.length
+    };
   }
 
   /**

@@ -246,6 +246,7 @@ class SchedulerController {
         post.status = 'published';
         post.publishedAt = new Date();
         post.publishedMediaId = result.json.mediaId;
+        post.platformPostUrl = result.json.permalink; // Store permalink for analytics matching
         await post.save();
 
         // Handle recurring posts - create next occurrence

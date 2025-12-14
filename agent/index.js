@@ -9,6 +9,7 @@ const { PlatformDefaults, PLATFORM_DEFAULTS } = require('./PlatformDefaults');
 const { Telemetry, LogTypes } = require('./Telemetry');
 const WebsiteExtractor = require('./WebsiteExtractor');
 const DeepResearch = require('./DeepResearch');
+const { CognitiveNarrator, AGENT_PERSONAS, ASPECT_RATIO_REASONS, STYLE_REASONS } = require('./CognitiveNarrator');
 
 
 function createAgent(options = {}) {
@@ -81,6 +82,11 @@ module.exports = {
    LogTypes,
    // Website & Research
    WebsiteExtractor,
-   DeepResearch
+   DeepResearch,
+   // Cognitive Layer
+   CognitiveNarrator,
+   AGENT_PERSONAS,
+   ASPECT_RATIO_REASONS,
+   STYLE_REASONS
 };
 

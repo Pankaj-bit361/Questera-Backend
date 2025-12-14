@@ -17,6 +17,19 @@ const DEFAULT_PROJECT_SETTINGS = {
     topP: 1,
 };
 
+// Helper to validate style for database storage
+// The style is still used for prompt enhancement (any string works)
+// But for DB, we map to valid enum values
+const validateStyleForDB = (style) => {
+    if (!style) return 'none';
+    // Check if it's already a valid enum value (case-insensitive check)
+    const validStyle = STYLES.find(s => s.toLowerCase() === style.toLowerCase());
+    if (validStyle) return validStyle;
+    // For any other style (cinematic, photorealistic, etc.), store as 'none' in DB
+    // The style was already applied to the prompt, so we don't lose it
+    return 'none';
+};
+
 class ImageController {
     constructor() {
         this.ai = new GoogleGenAI({
@@ -74,7 +87,7 @@ class ImageController {
                 viralContent, // Viral content (hashtags, description) from orchestrator
             } = req.body;
 
-        imageSizeOverride = '4K';
+            imageSizeOverride = '4K';
             if (!prompt) {
                 return { status: 400, json: { error: 'Prompt is required' } };
             }
@@ -346,7 +359,7 @@ class ImageController {
                     imageSettings: {
                         aspectRatio: finalSettings.aspectRatio,
                         imageSize: finalSettings.imageSize,
-                        style: finalSettings.style,
+                        style: validateStyleForDB(finalSettings.style),
                         instructions: finalSettings.instructions,
                         temperature: finalSettings.temperature,
                         topP: finalSettings.topP,
@@ -579,7 +592,7 @@ class ImageController {
                     imageSettings: {
                         aspectRatio: aspectRatio || 'auto',
                         imageSize: imageSize || '2K',
-                        style: style || 'none',
+                        style: validateStyleForDB(style),
                         instructions: '',
                         temperature: 1,
                         topP: 1,
