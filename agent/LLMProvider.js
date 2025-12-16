@@ -18,7 +18,7 @@ class OpenRouterProvider extends LLMProvider {
       super(config);
       this.apiKey = config.apiKey || process.env.OPENROUTER_API_KEY;
       this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-      this.model = config.model || 'google/gemini-2.5-flash-lite-preview-09-2025';
+      this.model = config.model || 'x-ai/grok-4.1-fast';
    }
 
    async chat(messages, options = {}) {
@@ -54,6 +54,94 @@ class OpenRouterProvider extends LLMProvider {
          console.warn('⚠️ [LLM] Empty response from OpenRouter:', JSON.stringify(data).slice(0, 200));
       }
       return content;
+   }
+
+   /**
+    * Stream chat completion - yields tokens as they arrive
+    * @param {Array} messages - Chat messages
+    * @param {Object} options - Options including onToken callback
+    * @yields {string} Token chunks
+    */
+   async *chatStream(messages, options = {}) {
+      const { temperature = 0.7, maxTokens = 4096 } = options;
+
+      console.log('🌐 [LLM] Starting stream with model:', this.model);
+      const response = await fetch(this.baseUrl, {
+         method: 'POST',
+         headers: {
+            'Authorization': `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://velosapps.com',
+            'X-Title': 'Questera AI'
+         },
+         body: JSON.stringify({
+            model: this.model,
+            messages,
+            temperature,
+            max_tokens: maxTokens,
+            stream: true
+         })
+      });
+
+      if (!response.ok) {
+         const errorText = await response.text();
+         console.error('❌ [LLM] OpenRouter stream error:', response.status, errorText);
+         throw new Error(`OpenRouter API error: ${response.status} - ${errorText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      try {
+         while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+               const trimmed = line.trim();
+               if (!trimmed || trimmed === 'data: [DONE]') continue;
+               if (!trimmed.startsWith('data: ')) continue;
+
+               try {
+                  const json = JSON.parse(trimmed.slice(6));
+                  const delta = json.choices?.[0]?.delta?.content;
+                  if (delta) {
+                     yield delta;
+                  }
+               } catch (e) {
+                  // Skip malformed JSON
+               }
+            }
+         }
+      } finally {
+         reader.releaseLock();
+      }
+   }
+
+   /**
+    * Stream chat and collect full response
+    * @param {Array} messages - Chat messages
+    * @param {Function} onToken - Callback for each token
+    * @returns {Promise<string>} Full response text
+    */
+   async chatWithStream(messages, options = {}) {
+      const { onToken, ...restOptions } = options;
+      let fullText = '';
+
+      for await (const token of this.chatStream(messages, restOptions)) {
+         fullText += token;
+         if (onToken) {
+            onToken(token, fullText);
+         }
+      }
+
+      console.log('✅ [LLM] Stream complete, length:', fullText.length);
+      return fullText;
    }
 
    async chatJSON(messages, options = {}) {

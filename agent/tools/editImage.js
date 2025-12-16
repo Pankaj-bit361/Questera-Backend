@@ -79,7 +79,8 @@ const editImageTool = {
             userId,
             imageChatId: chatId,
             images: imagesToEdit,
-            isEdit: true
+            isEdit: true,
+            skipSaveMessages: true // Agent route handles message saving for correct order
          }
       };
 

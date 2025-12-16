@@ -10,18 +10,14 @@ class InstagramController {
 
   /**
    * Get OAuth URL for user to connect Instagram
-   * Using Facebook OAuth dialog with Instagram permissions
+   * Uses Meta Graph API via Facebook OAuth (full features, requires FB Page)
    */
   getOAuthUrl(req, res) {
     try {
-      const state = Math.random().toString(36).substring(7);
+      const state = `graph_${Math.random().toString(36).substring(7)}`;
 
-      // Facebook OAuth scopes for Instagram Business
-      // Added business_management to access Business Portfolio assets
-      // Added instagram_manage_insights for analytics (impressions, reach, engagement, saves)
+      // Meta Graph API via Facebook OAuth (full features)
       const scope = 'pages_show_list,instagram_basic,instagram_manage_comments,instagram_content_publish,pages_read_engagement,business_management,instagram_manage_insights';
-
-      // Use Facebook OAuth dialog
       const oauthUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth?` +
         `client_id=${this.appId}` +
         `&redirect_uri=${encodeURIComponent(this.redirectUri)}` +
@@ -29,9 +25,9 @@ class InstagramController {
         `&response_type=code` +
         `&state=${state}`;
 
-      console.log('🔐 [INSTAGRAM] Generated OAuth URL:', oauthUrl);
+      console.log('🔐 [INSTAGRAM] Generated Graph API OAuth URL');
 
-      return { status: 200, json: { success: true, oauthUrl, state } };
+      return { status: 200, json: { success: true, oauthUrl, state, type: 'graph' } };
     } catch (error) {
       console.error('❌ [INSTAGRAM] Error generating OAuth URL:', error);
       return { status: 500, json: { error: error.message } };
@@ -40,7 +36,7 @@ class InstagramController {
 
   /**
    * Handle OAuth callback and exchange code for token
-   * Using Facebook Graph API flow
+   * Uses Facebook Graph API flow
    */
   async handleCallback(req, res) {
     try {
@@ -50,7 +46,7 @@ class InstagramController {
         return { status: 400, json: { error: 'Code and userId are required' } };
       }
 
-      console.log('🔐 [INSTAGRAM] Exchanging code for access token...');
+      console.log('🔐 [INSTAGRAM] Exchanging code for access token (Graph API)...');
 
       // Step 1: Exchange code for short-lived access token via Facebook Graph API
       const tokenUrl = `https://graph.facebook.com/${this.apiVersion}/oauth/access_token?` +
@@ -290,6 +286,8 @@ class InstagramController {
             profilePictureUrl: acc.profilePictureUrl,
             facebookPageName: acc.facebookPageName,
             connectedAt: acc.connectedAt,
+            // Include connection type for feature gating
+            connectionType: acc.connectionType || 'graph', // Default to 'graph' for legacy accounts
           }));
       } else if (instagram.instagramBusinessAccountId && instagram.isConnected) {
         // Legacy data - return as single account
@@ -301,6 +299,7 @@ class InstagramController {
           profilePictureUrl: instagram.profilePictureUrl,
           facebookPageName: instagram.facebookPageName,
           connectedAt: instagram.connectedAt,
+          connectionType: 'graph', // Legacy accounts are always Graph API
         }];
       }
 
@@ -442,14 +441,21 @@ class InstagramController {
 
       console.log('📸 [INSTAGRAM] Publishing image to Instagram...');
       console.log('📸 [INSTAGRAM] Image URL:', imageUrl);
+      console.log('📸 [INSTAGRAM] Account ID:', instagramBusinessAccountId);
+
+      // Facebook Graph API flow
+      const baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
+      console.log('📸 [INSTAGRAM] Using Facebook Graph API via', baseUrl);
 
       // Step 1: Create media container
-      const containerUrl = `https://graph.facebook.com/${this.apiVersion}/${instagramBusinessAccountId}/media`;
+      const containerUrl = `${baseUrl}/${instagramBusinessAccountId}/media`;
       const containerParams = new URLSearchParams({
         image_url: imageUrl,
         caption: caption || 'Created with Velos AI ✨',
         access_token: accessToken,
       });
+
+      console.log('📸 [INSTAGRAM] Container URL:', containerUrl);
 
       const containerResponse = await fetch(`${containerUrl}?${containerParams}`, {
         method: 'POST',
@@ -458,13 +464,13 @@ class InstagramController {
 
       if (containerData.error) {
         console.error('❌ [INSTAGRAM] Container creation failed:', containerData.error);
-        return { status: 400, json: { error: containerData.error.message } };
+        return { status: 400, json: { error: containerData.error.message, details: containerData.error } };
       }
 
       const containerId = containerData.id;
       console.log('✅ [INSTAGRAM] Media container created:', containerId);
 
-      // Step 2: Wait for container to be ready (poll status)
+      // Step 2: Wait for container to be ready
       let ready = false;
       let attempts = 0;
       const maxAttempts = 10;
@@ -472,7 +478,7 @@ class InstagramController {
       while (!ready && attempts < maxAttempts) {
         await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
 
-        const statusUrl = `https://graph.facebook.com/${this.apiVersion}/${containerId}?fields=status_code&access_token=${accessToken}`;
+        const statusUrl = `${baseUrl}/${containerId}?fields=status_code&access_token=${accessToken}`;
         const statusResponse = await fetch(statusUrl);
         const statusData = await statusResponse.json();
 
@@ -492,7 +498,7 @@ class InstagramController {
       }
 
       // Step 3: Publish the container
-      const publishUrl = `https://graph.facebook.com/${this.apiVersion}/${instagramBusinessAccountId}/media_publish`;
+      const publishUrl = `${baseUrl}/${instagramBusinessAccountId}/media_publish`;
       const publishParams = new URLSearchParams({
         creation_id: containerId,
         access_token: accessToken,
@@ -505,7 +511,7 @@ class InstagramController {
 
       if (publishData.error) {
         console.error('❌ [INSTAGRAM] Publish failed:', publishData.error);
-        return { status: 400, json: { error: publishData.error.message } };
+        return { status: 400, json: { error: publishData.error.message, details: publishData.error } };
       }
 
       console.log('✅ [INSTAGRAM] Image published! Media ID:', publishData.id);
@@ -513,7 +519,7 @@ class InstagramController {
       // Fetch the permalink for the published media
       let permalink = null;
       try {
-        const mediaInfoUrl = `https://graph.facebook.com/${this.apiVersion}/${publishData.id}?fields=permalink&access_token=${accessToken}`;
+        const mediaInfoUrl = `${baseUrl}/${publishData.id}?fields=permalink&access_token=${accessToken}`;
         const mediaInfoResponse = await fetch(mediaInfoUrl);
         const mediaInfo = await mediaInfoResponse.json();
         if (mediaInfo.permalink) {
@@ -536,6 +542,133 @@ class InstagramController {
       };
     } catch (error) {
       console.error('❌ [INSTAGRAM] Error publishing:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Publish an image as Instagram Story
+   * Stories require media_type: 'STORIES'
+   */
+  async publishStory(req) {
+    try {
+      const { userId, imageUrl, accountId } = req.body;
+
+      if (!userId || !imageUrl) {
+        return { status: 400, json: { error: 'userId and imageUrl are required' } };
+      }
+
+      console.log('📖 [INSTAGRAM] Publishing Story...');
+
+      const instagram = await Instagram.findOne({ userId });
+      if (!instagram) {
+        return { status: 404, json: { error: 'No Instagram accounts found for this user' } };
+      }
+
+      // Find the account
+      let account;
+      if (accountId) {
+        account = instagram.accounts?.find(acc => acc.instagramBusinessAccountId === accountId);
+      }
+      if (!account && instagram.accounts?.length > 0) {
+        account = instagram.accounts[0];
+      }
+      if (!account) {
+        account = {
+          instagramBusinessAccountId: instagram.instagramBusinessAccountId,
+          accessToken: instagram.accessToken,
+          instagramUsername: instagram.instagramUsername,
+        };
+      }
+
+      const { instagramBusinessAccountId, accessToken, instagramUsername } = account;
+
+      console.log('📖 [INSTAGRAM] Story Image URL:', imageUrl);
+      console.log('📖 [INSTAGRAM] Account ID:', instagramBusinessAccountId);
+
+      const baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
+
+      // Step 1: Create Story container with media_type: STORIES
+      const containerUrl = `${baseUrl}/${instagramBusinessAccountId}/media`;
+      const containerParams = new URLSearchParams({
+        image_url: imageUrl,
+        media_type: 'STORIES',
+        access_token: accessToken,
+      });
+
+      console.log('📖 [INSTAGRAM] Creating Story container...');
+
+      const containerResponse = await fetch(`${containerUrl}?${containerParams}`, {
+        method: 'POST',
+      });
+      const containerData = await containerResponse.json();
+
+      if (containerData.error) {
+        console.error('❌ [INSTAGRAM] Story container creation failed:', containerData.error);
+        return { status: 400, json: { error: containerData.error.message, details: containerData.error } };
+      }
+
+      const containerId = containerData.id;
+      console.log('✅ [INSTAGRAM] Story container created:', containerId);
+
+      // Step 2: Wait for container to be ready
+      let ready = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (!ready && attempts < maxAttempts) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        const statusUrl = `${baseUrl}/${containerId}?fields=status_code&access_token=${accessToken}`;
+        const statusResponse = await fetch(statusUrl);
+        const statusData = await statusResponse.json();
+
+        console.log('📖 [INSTAGRAM] Story container status:', statusData.status_code);
+
+        if (statusData.status_code === 'FINISHED') {
+          ready = true;
+        } else if (statusData.status_code === 'ERROR') {
+          return { status: 400, json: { error: 'Story processing failed' } };
+        }
+
+        attempts++;
+      }
+
+      if (!ready) {
+        return { status: 400, json: { error: 'Story processing timed out' } };
+      }
+
+      // Step 3: Publish the Story
+      const publishUrl = `${baseUrl}/${instagramBusinessAccountId}/media_publish`;
+      const publishParams = new URLSearchParams({
+        creation_id: containerId,
+        access_token: accessToken,
+      });
+
+      const publishResponse = await fetch(`${publishUrl}?${publishParams}`, {
+        method: 'POST',
+      });
+      const publishData = await publishResponse.json();
+
+      if (publishData.error) {
+        console.error('❌ [INSTAGRAM] Story publish failed:', publishData.error);
+        return { status: 400, json: { error: publishData.error.message, details: publishData.error } };
+      }
+
+      console.log('✅ [INSTAGRAM] Story published! Media ID:', publishData.id);
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          message: 'Story published to Instagram!',
+          mediaId: publishData.id,
+          type: 'story',
+          username: instagramUsername,
+        },
+      };
+    } catch (error) {
+      console.error('❌ [INSTAGRAM] Error publishing story:', error);
       return { status: 500, json: { error: error.message } };
     }
   }
@@ -603,6 +736,7 @@ class InstagramController {
       return { status: 500, json: { error: error.message } };
     }
   }
+
 }
 
 module.exports = InstagramController;

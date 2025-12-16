@@ -77,7 +77,7 @@ You must respond with ONLY valid JSON, no explanation:
 class SocialGrowthAgent {
   constructor() {
     this.llm = new OpenRouterProvider({
-      model: 'google/gemini-2.5-flash-lite-preview-09-2025',
+      model: 'x-ai/grok-4.1-fast',
     });
   }
 
@@ -107,7 +107,17 @@ class SocialGrowthAgent {
   }
 
   buildUserPrompt(observations, memory, config) {
+    const brand = memory.brand || {};
+    const topics = brand.topicsAllowed?.join(', ') || 'general content';
+
     return `## Current Account State
+
+### Brand Identity (IMPORTANT - Use this for content ideas)
+- Niche/Topics: ${topics}
+- Target Audience: ${brand.targetAudience || 'general audience'}
+- Visual Style: ${brand.visualStyle || 'modern'}
+- Brand Tone: ${brand.tone || 'friendly'}
+- Unique Selling Points: ${brand.uniqueSellingPoints?.join(', ') || 'not specified'}
 
 ### Performance Observations (Last 7 Days)
 - Engagement Trend: ${observations.engagementTrend || 'unknown'}
@@ -136,7 +146,9 @@ ${memory.performance?.bestTimes?.join(', ') || '10:00, 18:00'}
 ### Current Date & Time
 ${new Date().toISOString()}
 
-Based on this data, create today's content plan. Focus on sustainable growth.`;
+Based on this data, create today's content plan.
+IMPORTANT: The promptSuggestion MUST be specific to the brand's niche (${topics}).
+Focus on sustainable growth.`;
   }
 
   formatContentHistory(history) {

@@ -7,6 +7,8 @@ You do NOT generate content, images, captions, or schedules.
 You do NOT call tools.
 You ONLY return a JSON object.
 
+CRITICAL: Be ACTION-ORIENTED. When user wants something done, classify appropriately and DO NOT ask for clarification.
+
 ━━━━━━━━━━━━━━━━━━━━━━
 INTENTS (EXACT VALUES)
 ━━━━━━━━━━━━━━━━━━━━━━
@@ -27,6 +29,17 @@ CLASSIFICATION RULES (PRIORITY ORDER)
 2. DEEP RESEARCH (EXPLICIT ONLY): ONLY if user says: research, analyze, compare, report, competitive analysis → deep_research
    Examples: "research my competitors", "analyze the market for AI tools", "write a report on trends"
    ⚠️ Do NOT use for simple content requests - only explicit research requests
+
+3. AUTOMATION/CONTENT REQUESTS → generate_and_post (HIGH PRIORITY):
+   - "automate my channel/account" → generate_and_post
+   - "manage my [account]" → generate_and_post
+   - "create content for my [account]" → generate_and_post
+   - "generate a new post" → generate_and_post
+   - "create stories/reels/post for [account]" → generate_and_post
+   - "help me with content for [platform]" → generate_and_post
+   - User mentions account name + content creation → generate_and_post
+
+   ⚠️ NEVER classify these as "chat" - they are clear action requests!
 
 3. COMPOUND ACTIONS: If user says BOTH (create/generate/make image) AND (post/publish/schedule/instagram) → generate_and_post
    Examples: "create an image and post it", "make a superman image and post to instagram"
@@ -58,12 +71,17 @@ Return ONLY this JSON. No text. No markdown.
   "reason": "short explanation"
 }`;
 
-const CONFIDENCE_THRESHOLD = 0.8;
+// Lower threshold - 0.6 is enough for action intents
+// Only truly ambiguous requests should need clarification
+const CONFIDENCE_THRESHOLD = 0.6;
+
+// Intents that should NEVER need clarification if detected
+const ACTION_INTENTS = ['generate_image', 'generate_and_post', 'edit_image', 'schedule_post', 'website_content', 'deep_research'];
 
 class RouterAgent {
    constructor(options = {}) {
       this.llm = new OpenRouterProvider({
-         model: options.model || 'google/gemini-2.5-flash-lite-preview-09-2025'
+         model: options.model || 'x-ai/grok-4.1-fast'
       });
    }
 
@@ -100,10 +118,24 @@ class RouterAgent {
          result.intent = 'chat';
       }
 
-      // Apply confidence gate
+      // Apply confidence gate - but NEVER force clarification for action intents
+      // If the LLM detected an action intent, trust it and proceed
       if (result.confidence < CONFIDENCE_THRESHOLD && !result.needs_clarification) {
-         console.log('⚠️ [ROUTER] Low confidence, flagging for clarification:', result.confidence);
-         result.needs_clarification = true;
+         // Only flag for clarification if it's a "chat" intent with low confidence
+         // Action intents should proceed even with lower confidence
+         if (!ACTION_INTENTS.includes(result.intent)) {
+            console.log('⚠️ [ROUTER] Low confidence chat, flagging for clarification:', result.confidence);
+            result.needs_clarification = true;
+         } else {
+            console.log('✅ [ROUTER] Action intent detected, proceeding despite lower confidence:', result.intent, result.confidence);
+         }
+      }
+
+      // OVERRIDE: If LLM says needs_clarification but detected an action intent, IGNORE clarification
+      // This prevents over-cautious behavior
+      if (result.needs_clarification && ACTION_INTENTS.includes(result.intent) && result.confidence >= 0.5) {
+         console.log('✅ [ROUTER] Overriding clarification for action intent:', result.intent);
+         result.needs_clarification = false;
       }
 
       return {

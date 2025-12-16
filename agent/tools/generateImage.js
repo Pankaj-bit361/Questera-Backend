@@ -67,7 +67,8 @@ const generateImageTool = {
             images: imagesToUse,
             isEdit: false,
             style,
-            aspectRatio
+            aspectRatio,
+            skipSaveMessages: true // Agent route handles message saving for correct order
          }
       };
 

@@ -245,6 +245,157 @@ router.post('/', async (req, res) => {
 
 
 // ━━━━━━━━━━━━━━━━━━━━━━
+// STREAMING ENDPOINT (SSE)
+// ━━━━━━━━━━━━━━━━━━━━━━
+router.post('/stream', async (req, res) => {
+   // Set SSE headers
+   res.setHeader('Content-Type', 'text/event-stream');
+   res.setHeader('Cache-Control', 'no-cache');
+   res.setHeader('Connection', 'keep-alive');
+   res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
+   res.flushHeaders();
+
+   // Helper to send SSE events
+   const emit = (event) => {
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+   };
+
+   try {
+      const { userId, message, imageChatId, referenceImages = [], lastImageUrl } = req.body;
+
+      if (!userId) {
+         emit({ type: 'error', data: { message: 'userId is required' } });
+         res.end();
+         return;
+      }
+
+      if (!message) {
+         emit({ type: 'error', data: { message: 'message is required' } });
+         res.end();
+         return;
+      }
+
+      console.log('🌊 [STREAM] Starting streaming request');
+      console.log('👤 [STREAM] User:', userId);
+      console.log('💬 [STREAM] Message:', message?.slice(0, 50));
+
+      const agentInstance = getAgent();
+      const routerInstance = getRouterAgent();
+
+      if (!agentInstance) {
+         emit({ type: 'error', data: { message: 'Agent service unavailable' } });
+         res.end();
+         return;
+      }
+
+      // Generate chatId if not provided
+      let chatId = imageChatId || `chat-${uuidv4()}`;
+      emit({ type: 'init', data: { chatId } });
+
+      // Get chat history
+      const history = await ImageMessage.find({ imageChatId: chatId })
+         .sort({ createdAt: 1 })
+         .limit(10)
+         .lean();
+
+      // STEP 1: Router Agent classifies intent
+      let routerResult = null;
+      if (routerInstance) {
+         emit({ type: 'thinking', data: { stage: 'routing', message: 'Analyzing intent...' } });
+         routerResult = await routerInstance.classify(message, { history, lastImageUrl, referenceImages });
+         console.log('🔀 [STREAM] Router result:', JSON.stringify(routerResult));
+
+         Telemetry.logIntent(userId, message, routerResult.intent, routerResult.confidence, routerResult.needsClarification);
+
+         // Handle clarification
+         if (routerResult.needsClarification) {
+            const clarificationMsg = routerInstance.getClarificationQuestion(routerResult.intent, routerResult.reason);
+            await saveMessage(chatId, userId, 'user', message);
+            await saveMessage(chatId, userId, 'assistant', clarificationMsg);
+
+            emit({ type: 'clarification', data: { message: clarificationMsg, intent: routerResult.intent } });
+            emit({ type: 'done', data: { imageChatId: chatId } });
+            res.end();
+            return;
+         }
+
+         emit({ type: 'intent', data: { intent: routerResult.intent, confidence: routerResult.confidence } });
+      }
+
+      // STEP 2: Save user message FIRST for proper order
+      await saveMessage(chatId, userId, 'user', message, referenceImages);
+
+      // STEP 3: Run agent with streaming
+      const result = await agentInstance.runStream({
+         userId,
+         chatId,
+         message,
+         referenceImages: referenceImages || [],
+         lastImageUrl,
+         routerIntent: routerResult?.intent
+      }, emit);
+
+      if (!result.success) {
+         const errorMsg = result.message || 'Something went wrong';
+         await saveMessage(chatId, userId, 'assistant', errorMsg);
+         emit({ type: 'error', data: { message: errorMsg } });
+         emit({ type: 'done', data: { imageChatId: chatId } });
+         res.end();
+         return;
+      }
+
+      const toolResult = result.result || {};
+      const cognitive = result.cognitive || toolResult.cognitive || null;
+
+      // Handle different result types - user message already saved above
+      if (result.message && !result.result) {
+         // Conversation response
+         await saveMessage(chatId, userId, 'assistant', result.message);
+         emit({ type: 'done', data: { imageChatId: chatId, intent: 'conversation', cognitive } });
+      } else if (toolResult.imageUrl) {
+         // Image generation - save assistant message with image
+         await saveMessage(chatId, userId, 'assistant', 'Image generated successfully', [toolResult.imageUrl]);
+         emit({
+            type: 'image', data: {
+               imageUrl: toolResult.imageUrl,
+               images: toolResult.images,
+               creditsRemaining: toolResult.creditsRemaining,
+               cognitive
+            }
+         });
+         emit({ type: 'done', data: { imageChatId: toolResult.imageChatId || chatId, intent: 'image_generation' } });
+      } else if (toolResult.postId) {
+         // Schedule post
+         const scheduleMsg = toolResult.message || `Post scheduled for ${toolResult.scheduledAt}`;
+         await saveMessage(chatId, userId, 'assistant', scheduleMsg);
+         emit({ type: 'scheduled', data: { postId: toolResult.postId, message: scheduleMsg, cognitive } });
+         emit({ type: 'done', data: { imageChatId: chatId, intent: 'schedule' } });
+      } else if (toolResult.accounts) {
+         // Accounts list
+         const accountsMsg = toolResult.message || `Found ${toolResult.count} account(s)`;
+         await saveMessage(chatId, userId, 'assistant', accountsMsg);
+         emit({ type: 'accounts', data: { accounts: toolResult.accounts, message: accountsMsg, cognitive } });
+         emit({ type: 'done', data: { imageChatId: chatId, intent: 'accounts' } });
+      } else {
+         // Fallback - includes reply tool and other conversation responses
+         const fallbackMsg = toolResult.message || result.message || 'Done';
+         await saveMessage(chatId, userId, 'assistant', fallbackMsg);
+         // Emit the message content so frontend can display it
+         emit({ type: 'message', data: { content: fallbackMsg, cognitive } });
+         emit({ type: 'done', data: { imageChatId: chatId, intent: result.toolUsed || 'unknown', cognitive } });
+      }
+
+      res.end();
+
+   } catch (error) {
+      console.error('❌ [STREAM] Error:', error.message);
+      emit({ type: 'error', data: { message: error.message } });
+      res.end();
+   }
+});
+
+
+// ━━━━━━━━━━━━━━━━━━━━━━
 // FEEDBACK ENDPOINT
 // ━━━━━━━━━━━━━━━━━━━━━━
 router.post('/feedback', async (req, res) => {

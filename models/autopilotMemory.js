@@ -38,6 +38,28 @@ const autopilotMemorySchema = new mongoose.Schema({
     uniqueSellingPoints: { type: [String], default: [] },
   },
 
+  // Reference images for content generation
+  referenceImages: {
+    // Product images - actual products to feature in content
+    productImages: [{
+      url: { type: String, required: true },
+      name: { type: String, default: '' },
+      description: { type: String, default: '' },
+      uploadedAt: { type: Date, default: Date.now },
+    }],
+    // Style references - aesthetic/mood references
+    styleReferences: [{
+      url: { type: String, required: true },
+      name: { type: String, default: '' },
+      uploadedAt: { type: Date, default: Date.now },
+    }],
+    // Personal reference - user's face for personalized AI images
+    personalReference: {
+      url: { type: String, default: null },
+      uploadedAt: { type: Date, default: null },
+    },
+  },
+
   // Performance insights (updated daily)
   performance: {
     // Best performing content types

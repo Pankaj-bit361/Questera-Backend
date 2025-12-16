@@ -69,4 +69,15 @@ instagramRouter.post('/refresh-token', async (req, res) => {
   }
 });
 
+// Publish Story to Instagram
+instagramRouter.post('/publish-story', async (req, res) => {
+  try {
+    const { status, json } = await instagramController.publishStory(req, res);
+    return res.status(status).json(json);
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = instagramRouter;

@@ -6,6 +6,7 @@ const getAccountsTool = require('./getAccounts');
 const createVariationsTool = require('./createVariations');
 const extractWebsiteTool = require('./extractWebsite');
 const deepResearchTool = require('./deepResearch');
+const autopilotTool = require('./autopilot');
 
 
 const allTools = [
@@ -16,7 +17,8 @@ const allTools = [
    getAccountsTool,
    createVariationsTool,
    extractWebsiteTool,
-   deepResearchTool
+   deepResearchTool,
+   autopilotTool
 ];
 
 
@@ -29,6 +31,7 @@ module.exports = {
    createVariationsTool,
    extractWebsiteTool,
    deepResearchTool,
+   autopilotTool,
    allTools
 };
 

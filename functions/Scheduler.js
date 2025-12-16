@@ -233,14 +233,29 @@ class SchedulerController {
     console.log(`📤 [SCHEDULER] Publishing post ${post.postId} to ${post.platform}...`);
 
     if (post.platform === 'instagram') {
-      const result = await this.instagramController.publishImage({
-        body: {
-          userId: post.userId,
-          imageUrl: post.imageUrl,
-          caption: post.fullCaption,
-          accountId: post.accountId,
-        },
-      });
+      let result;
+
+      // Check if this is a Story or regular post
+      if (post.postType === 'story') {
+        console.log('📖 [SCHEDULER] Publishing as Instagram Story...');
+        result = await this.instagramController.publishStory({
+          body: {
+            userId: post.userId,
+            imageUrl: post.imageUrl,
+            accountId: post.accountId,
+          },
+        });
+      } else {
+        // Regular feed post
+        result = await this.instagramController.publishImage({
+          body: {
+            userId: post.userId,
+            imageUrl: post.imageUrl,
+            caption: post.fullCaption,
+            accountId: post.accountId,
+          },
+        });
+      }
 
       if (result.json.success) {
         post.status = 'published';
@@ -254,7 +269,8 @@ class SchedulerController {
           await this.createNextRecurrence(post);
         }
 
-        console.log(`✅ [SCHEDULER] Post ${post.postId} published successfully!`);
+        const postTypeLabel = post.postType === 'story' ? 'Story' : 'Post';
+        console.log(`✅ [SCHEDULER] ${postTypeLabel} ${post.postId} published successfully!`);
         return { success: true, mediaId: result.json.mediaId };
       } else {
         throw new Error(result.json.error || 'Failed to publish to Instagram');

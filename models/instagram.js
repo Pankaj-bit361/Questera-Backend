@@ -8,7 +8,7 @@ const instagramAccountSchema = new mongoose.Schema({
   },
   facebookPageId: {
     type: String,
-    required: true,
+    required: false, // Optional for 'basic' connection type
   },
   facebookPageName: {
     type: String,
@@ -33,6 +33,17 @@ const instagramAccountSchema = new mongoose.Schema({
   connectedAt: {
     type: Date,
     default: Date.now,
+  },
+  // Connection type for feature gating
+  // 'graph' = Meta Graph API (full features: reels, stories, insights, automation)
+  // 'basic' = Instagram Basic Display API (limited: post images only)
+  connectionType: {
+    type: String,
+    enum: ['graph', 'basic'],
+    default: 'graph',
+  },
+  tokenExpiresAt: {
+    type: Date,
   },
 });
 

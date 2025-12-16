@@ -3,8 +3,36 @@ const autopilotRouter = express.Router();
 const AutopilotConfig = require('../models/autopilotConfig');
 const AutopilotMemory = require('../models/autopilotMemory');
 const AutopilotService = require('../functions/AutopilotService');
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const { v4: uuidv4 } = require('uuid');
 
 const autopilotService = new AutopilotService();
+
+// S3 client for image uploads
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+const bucketName = process.env.AWS_S3_BUCKET_NAME;
+
+// Helper to upload base64 image to S3
+async function uploadToS3(base64Data, mimeType, folder = 'autopilot') {
+  const extension = mimeType?.split('/')[1] || 'png';
+  const fileName = `${folder}/${uuidv4()}.${extension}`;
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  await s3.send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: fileName,
+    Body: buffer,
+    ContentType: mimeType,
+  }));
+
+  return `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+}
 
 /**
  * GET /autopilot/config/:userId/:chatId
@@ -197,6 +225,76 @@ autopilotRouter.get('/memory/:userId/:chatId', async (req, res) => {
 });
 
 /**
+ * PUT /autopilot/memory/:userId/:chatId
+ * Update autopilot memory (brand info)
+ */
+autopilotRouter.put('/memory/:userId/:chatId', async (req, res) => {
+  try {
+    const { userId, chatId } = req.params;
+    const { brand } = req.body;
+
+    let memory = await AutopilotMemory.findOne({ userId, chatId });
+
+    if (!memory) {
+      memory = new AutopilotMemory({ userId, chatId });
+    }
+
+    // Update brand info
+    if (brand) {
+      if (brand.niche || brand.topics || brand.topicsAllowed) {
+        const topics = brand.topicsAllowed || brand.topics || brand.niche;
+        memory.brand.topicsAllowed = Array.isArray(topics)
+          ? topics
+          : topics.split(',').map(t => t.trim());
+      }
+      if (brand.targetAudience) {
+        memory.brand.targetAudience = brand.targetAudience;
+      }
+      if (brand.visualStyle) {
+        memory.brand.visualStyle = brand.visualStyle;
+      }
+      if (brand.tone) {
+        memory.brand.tone = brand.tone;
+      }
+      if (brand.uniqueSellingPoints) {
+        memory.brand.uniqueSellingPoints = Array.isArray(brand.uniqueSellingPoints)
+          ? brand.uniqueSellingPoints
+          : [brand.uniqueSellingPoints];
+      }
+    }
+
+    await memory.save();
+
+    // Brand is complete if we have the 3 required fields (topics is optional)
+    const brandComplete = !!(
+      memory.brand.targetAudience?.trim() &&
+      memory.brand.visualStyle?.trim() &&
+      memory.brand.tone?.trim()
+    );
+
+    console.log('[AUTOPILOT] Brand saved:', {
+      topics: memory.brand.topicsAllowed,
+      targetAudience: !!memory.brand.targetAudience,
+      visualStyle: !!memory.brand.visualStyle,
+      tone: !!memory.brand.tone,
+      brandComplete
+    });
+
+    return res.status(200).json({
+      success: true,
+      memory,
+      brandComplete,
+      message: brandComplete
+        ? 'Brand info saved successfully! Autopilot is ready to run.'
+        : 'Brand info partially saved. Please complete all required fields.',
+    });
+  } catch (error) {
+    console.error('[AUTOPILOT] Update Memory Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * GET /autopilot/status/:userId/:chatId
  * Get full autopilot status (config + memory + last run)
  */
@@ -206,6 +304,13 @@ autopilotRouter.get('/status/:userId/:chatId', async (req, res) => {
 
     const config = await AutopilotConfig.findOne({ userId, chatId });
     const memory = await AutopilotMemory.findOne({ userId, chatId });
+
+    // Check if brand info is complete
+    const brandComplete = !!(
+      memory?.brand?.targetAudience?.trim() &&
+      memory?.brand?.visualStyle?.trim() &&
+      memory?.brand?.tone?.trim()
+    );
 
     return res.status(200).json({
       success: true,
@@ -221,6 +326,8 @@ autopilotRouter.get('/status/:userId/:chatId', async (req, res) => {
         totalPostsGenerated: memory?.totalPostsGenerated || 0,
         totalStoriesGenerated: memory?.totalStoriesGenerated || 0,
       },
+      memory: memory || null,
+      brandComplete,
     });
   } catch (error) {
     console.error('[AUTOPILOT] Status Error:', error);
@@ -291,5 +398,147 @@ autopilotRouter.get('/list/:userId', async (req, res) => {
   }
 });
 
+/**
+ * POST /autopilot/images/:userId/:chatId
+ * Upload reference images (products, style, personal)
+ */
+autopilotRouter.post('/images/:userId/:chatId', async (req, res) => {
+  try {
+    const { userId, chatId } = req.params;
+    const { images, type = 'product' } = req.body;
+    // images: [{ data: base64, mimeType: 'image/png', name?: '', description?: '' }]
+
+    if (!images || !images.length) {
+      return res.status(400).json({ error: 'images array is required' });
+    }
+
+    let memory = await AutopilotMemory.findOne({ userId, chatId });
+    if (!memory) {
+      memory = new AutopilotMemory({ userId, chatId });
+    }
+
+    // Initialize referenceImages if not exists
+    if (!memory.referenceImages) {
+      memory.referenceImages = {
+        productImages: [],
+        styleReferences: [],
+        personalReference: { url: null, uploadedAt: null },
+      };
+    }
+
+    const uploadedUrls = [];
+
+    for (const img of images) {
+      const url = await uploadToS3(img.data, img.mimeType, `autopilot/${type}`);
+      uploadedUrls.push(url);
+
+      if (type === 'product') {
+        memory.referenceImages.productImages.push({
+          url,
+          name: img.name || '',
+          description: img.description || '',
+          uploadedAt: new Date(),
+        });
+      } else if (type === 'style') {
+        memory.referenceImages.styleReferences.push({
+          url,
+          name: img.name || '',
+          uploadedAt: new Date(),
+        });
+      } else if (type === 'personal') {
+        // Personal reference is single image, replace existing
+        memory.referenceImages.personalReference = {
+          url,
+          uploadedAt: new Date(),
+        };
+      }
+    }
+
+    await memory.save();
+
+    return res.status(200).json({
+      success: true,
+      message: `${uploadedUrls.length} image(s) uploaded successfully`,
+      urls: uploadedUrls,
+      referenceImages: memory.referenceImages,
+    });
+  } catch (error) {
+    console.error('[AUTOPILOT] Image Upload Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /autopilot/images/:userId/:chatId
+ * Delete a reference image
+ */
+autopilotRouter.delete('/images/:userId/:chatId', async (req, res) => {
+  try {
+    const { userId, chatId } = req.params;
+    const { type, url } = req.body;
+
+    const memory = await AutopilotMemory.findOne({ userId, chatId });
+    if (!memory || !memory.referenceImages) {
+      return res.status(404).json({ error: 'No reference images found' });
+    }
+
+    if (type === 'product') {
+      memory.referenceImages.productImages = memory.referenceImages.productImages.filter(
+        img => img.url !== url
+      );
+    } else if (type === 'style') {
+      memory.referenceImages.styleReferences = memory.referenceImages.styleReferences.filter(
+        img => img.url !== url
+      );
+    } else if (type === 'personal') {
+      memory.referenceImages.personalReference = { url: null, uploadedAt: null };
+    }
+
+    await memory.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Image deleted',
+      referenceImages: memory.referenceImages,
+    });
+  } catch (error) {
+    console.error('[AUTOPILOT] Image Delete Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * GET /autopilot/images/:userId/:chatId
+ * Get all reference images
+ */
+autopilotRouter.get('/images/:userId/:chatId', async (req, res) => {
+  try {
+    const { userId, chatId } = req.params;
+
+    const memory = await AutopilotMemory.findOne({ userId, chatId });
+
+    if (!memory || !memory.referenceImages) {
+      return res.status(200).json({
+        success: true,
+        referenceImages: {
+          productImages: [],
+          styleReferences: [],
+          personalReference: { url: null },
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      referenceImages: memory.referenceImages,
+    });
+  } catch (error) {
+    console.error('[AUTOPILOT] Get Images Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = autopilotRouter;
+
+
 

@@ -6,9 +6,9 @@ class OpenRouterLLM {
   constructor() {
     this.apiKey = process.env.OPENROUTER_API_KEY;
     this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-    this.model = 'google/gemini-2.5-flash-lite-preview-09-2025'; // Fast thinking model
+    this.model = 'x-ai/grok-4.1-fast'; // Fast thinking model
   }
-
+  
   /**
    * Generate text using OpenRouter API
    * @param {string} prompt - The prompt to send

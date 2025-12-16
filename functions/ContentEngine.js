@@ -243,30 +243,53 @@ OUTPUT FORMAT (JSON):
       ? `${brandName} - New ${productsText} Drop! 🔥`
       : `Check this out! ✨`;
 
-    const description = brandName
-      ? `${brandName} presents the latest ${productsText}! ✨\n\n${concept}\n\nDouble tap if you love it! 👇`
-      : `${concept} ✨\n\nDouble tap if you agree! 👇`;
+    // Viral hook - scroll-stopping first line
+    const hook = brandName
+      ? `This changes everything. ${brandName} just raised the bar. 🔥`
+      : 'You have never seen anything like this before. ⚡';
+
+    // Body - story/context
+    const body = concept
+      ? `${concept}\n\nEvery detail tells a story.`
+      : 'When creativity meets AI magic, this is what happens.';
+
+    // CTA - drive engagement
+    const callToAction = brandName
+      ? `Save this for later 🔖 Follow @${brandTag.toLowerCase()} for more ✨\nTag someone who needs to see this 👇`
+      : 'Save this 🔖 Follow for more AI creations ✨\nDrop a 🔥 if you love it 👇';
+
+    // Full description with proper structure
+    const description = `${hook}\n\n${body}\n\n${callToAction}`;
 
     const brandedTags = brandName
-      ? [brandTag.toLowerCase(), `${brandTag}style`.toLowerCase(), 'brandnew']
-      : ['questera', 'aigenerated'];
+      ? [brandTag.toLowerCase(), `${brandTag}style`.toLowerCase(), `${brandTag}official`.toLowerCase()]
+      : ['velosai', 'aigenerated', 'aigeneratedart'];
+
+    // PROPER HASHTAG STRING - 25+ hashtags for maximum reach
+    const nicheHashtags = '#AIArt #AIGenerated #DigitalArt #GenerativeArt #AIArtCommunity #DigitalArtDaily';
+    const mediumHashtags = '#ConceptArt #DigitalCreation #ArtOfTheDay #CreativeArt #ModernArt #FuturisticArt';
+    const broadHashtags = '#Art #Design #Creative #Explore #Instagood #PhotoOfTheDay #InstaArt';
+    const viralHashtags = '#Viral #Trending #FYP #ForYou #Discover';
+    const brandHashtags = brandName ? `#${brandTag.toLowerCase()} #${brandTag}Style` : '#VelosAI #AIPowered';
+
+    const hashtagString = `${nicheHashtags} ${mediumHashtags} ${broadHashtags} ${viralHashtags} ${brandHashtags}`;
 
     return {
       title,
-      hook: brandName ? `${brandName} just dropped something amazing...` : 'You won\'t believe what happened next...',
+      hook,
       description,
-      shortCaption: brandName ? `${brandName} ${productsText} 🔥` : 'New post alert! 🔥',
-      callToAction: brandName ? `Would you wear ${brandName}? Comment below! 👇` : 'What do you think? Comment below! 👇',
+      shortCaption: hook, // Use the hook as short caption too
+      callToAction,
       hashtags: {
-        primary: ['viral', 'trending', 'explore', 'foryou', 'instagood'],
-        secondary: ['fashion', 'style', 'ootd', 'clothing', 'outfitoftheday'],
-        niche: ['fashionbrand', 'newcollection', 'streetwear'],
+        primary: ['viral', 'trending', 'explore', 'foryou', 'instagood', 'photooftheday'],
+        secondary: ['aiart', 'digitalart', 'aigenerated', 'generativeart', 'aiartcommunity'],
+        niche: ['conceptart', 'digitalcreation', 'futuristicart', 'modernart', 'creativeart'],
         branded: brandedTags
       },
-      hashtagString: `#viral #trending #explore #fashion #style ${brandName ? `#${brandTag.toLowerCase()}` : '#questera'} #ootd #newcollection`,
+      hashtagString,
       bestPostingTimes: ['9:00 AM', '12:00 PM', '7:00 PM'],
-      viralScore: 6,
-      viralTips: ['Post during peak hours', 'Engage with comments quickly', 'Use trending audio']
+      viralScore: 7,
+      viralTips: ['Post during peak hours (9AM, 12PM, 7PM)', 'Engage with comments in first 30 min', 'Use trending audio for Reels', 'Cross-post to Stories with poll sticker']
     };
   }
 

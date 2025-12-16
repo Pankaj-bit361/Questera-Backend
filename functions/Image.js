@@ -85,6 +85,7 @@ class ImageController {
                 imageSize: imageSizeOverride,
                 style: styleOverride,
                 viralContent, // Viral content (hashtags, description) from orchestrator
+                skipSaveMessages, // Flag to skip saving messages (used by agent route which handles saving separately)
             } = req.body;
 
             imageSizeOverride = '4K';
@@ -320,57 +321,65 @@ class ImageController {
             const chatId = imageChatId || 'chat-' + uuidv4();
             const messageId = 'm' + uuidv4();
 
-            console.log('💾 [GENERATE] Saving user message...');
-            // Use originalMessage if provided, otherwise fall back to prompt
-            const displayMessage = originalMessage || prompt;
-            const userMessage = await ImageMessage.create({
-                role: 'user',
-                userId,
-                content: displayMessage, // Save original user message, not enhanced prompt
-                referenceImages: referenceImageUrls,
-                imageChatId: chatId,
-                messageId: 'm-' + uuidv4(),
-            });
-            console.log('✅ [GENERATE] User message saved');
+            // Only save messages if not skipped (agent route handles saving separately for proper order)
+            let userMessage = null;
+            let assistantMessage = null;
 
-            console.log('💾 [GENERATE] Saving assistant message...');
-            const assistantMessage = await ImageMessage.create({
-                role: 'assistant',
-                userId,
-                content: textResponse || 'Image generated successfully',
-                imageUrl: generatedImages.length > 0 ? generatedImages[0].url : null,
-                imageChatId: chatId,
-                messageId: 'm-' + uuidv4(),
-                viralContent: viralContent || null, // Save viral content for Instagram posts
-            });
-            console.log('✅ [GENERATE] Assistant message saved');
-
-            console.log('💾 [GENERATE] Saving/updating conversation...');
-            let imageConversation = existingConversation || await Image.findOne({ imageChatId: chatId });
-
-            if (!imageConversation) {
-                console.log('🆕 [GENERATE] Creating new conversation...');
-                imageConversation = await Image.create({
-                    name: prompt.substring(0, 50),
-                    desc: prompt,
+            if (!skipSaveMessages) {
+                console.log('💾 [GENERATE] Saving user message...');
+                // Use originalMessage if provided, otherwise fall back to prompt
+                const displayMessage = originalMessage || prompt;
+                userMessage = await ImageMessage.create({
+                    role: 'user',
                     userId,
+                    content: displayMessage, // Save original user message, not enhanced prompt
+                    referenceImages: referenceImageUrls,
                     imageChatId: chatId,
-                    messages: [userMessage._id, assistantMessage._id],
-                    imageSettings: {
-                        aspectRatio: finalSettings.aspectRatio,
-                        imageSize: finalSettings.imageSize,
-                        style: validateStyleForDB(finalSettings.style),
-                        instructions: finalSettings.instructions,
-                        temperature: finalSettings.temperature,
-                        topP: finalSettings.topP,
-                    },
+                    messageId: 'm-' + uuidv4(),
                 });
-                console.log('✅ [GENERATE] New conversation created:', chatId);
+                console.log('✅ [GENERATE] User message saved');
+
+                console.log('💾 [GENERATE] Saving assistant message...');
+                assistantMessage = await ImageMessage.create({
+                    role: 'assistant',
+                    userId,
+                    content: textResponse || 'Image generated successfully',
+                    imageUrl: generatedImages.length > 0 ? generatedImages[0].url : null,
+                    imageChatId: chatId,
+                    messageId: 'm-' + uuidv4(),
+                    viralContent: viralContent || null, // Save viral content for Instagram posts
+                });
+                console.log('✅ [GENERATE] Assistant message saved');
+
+                console.log('💾 [GENERATE] Saving/updating conversation...');
+                let imageConversation = existingConversation || await Image.findOne({ imageChatId: chatId });
+
+                if (!imageConversation) {
+                    console.log('🆕 [GENERATE] Creating new conversation...');
+                    imageConversation = await Image.create({
+                        name: prompt.substring(0, 50),
+                        desc: prompt,
+                        userId,
+                        imageChatId: chatId,
+                        messages: [userMessage._id, assistantMessage._id],
+                        imageSettings: {
+                            aspectRatio: finalSettings.aspectRatio,
+                            imageSize: finalSettings.imageSize,
+                            style: validateStyleForDB(finalSettings.style),
+                            instructions: finalSettings.instructions,
+                            temperature: finalSettings.temperature,
+                            topP: finalSettings.topP,
+                        },
+                    });
+                    console.log('✅ [GENERATE] New conversation created:', chatId);
+                } else {
+                    console.log('📝 [GENERATE] Updating existing conversation...');
+                    imageConversation.messages.push(userMessage._id, assistantMessage._id);
+                    await imageConversation.save();
+                    console.log('✅ [GENERATE] Conversation updated');
+                }
             } else {
-                console.log('📝 [GENERATE] Updating existing conversation...');
-                imageConversation.messages.push(userMessage._id, assistantMessage._id);
-                await imageConversation.save();
-                console.log('✅ [GENERATE] Conversation updated');
+                console.log('⏭️ [GENERATE] Skipping message save (handled by agent route)');
             }
 
             // Deduct credit after successful generation

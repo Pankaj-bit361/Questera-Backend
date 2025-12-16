@@ -47,7 +47,7 @@ function parseRelativeTime(timeStr) {
 
 const schedulePostTool = {
    name: 'schedule_post',
-   description: 'Schedule or immediately post an image to Instagram. Use "now" for immediate posting.',
+   description: 'Schedule or immediately post an image to Instagram feed OR story. Use "now" for immediate posting. Set postType to "story" for Instagram Stories.',
    parameters: {
       imageUrl: {
          type: 'string',
@@ -57,12 +57,17 @@ const schedulePostTool = {
       caption: {
          type: 'string',
          required: true,
-         description: 'Caption for the Instagram post'
+         description: 'Caption for the Instagram post (ignored for stories)'
       },
       scheduledTime: {
          type: 'string',
          required: true,
          description: 'When to post. Use "now" for immediate, or relative like "2 minutes", "1 hour"'
+      },
+      postType: {
+         type: 'string',
+         required: false,
+         description: 'Type of post: "image" for feed post (default), "story" for Instagram Story'
       },
       accountUsername: {
          type: 'string',
@@ -72,20 +77,25 @@ const schedulePostTool = {
       hashtags: {
          type: 'string',
          required: false,
-         description: 'Hashtags to add to the post'
+         description: 'Hashtags to add to the post (ignored for stories)'
       }
    },
 
    execute: async (params, context) => {
-      const { caption, scheduledTime, accountUsername, hashtags } = params;
+      const { caption, scheduledTime, accountUsername, hashtags, postType } = params;
       const { userId, lastImageUrl } = context;
 
       // Use provided imageUrl or fall back to last generated image
       const imageUrl = params.imageUrl || lastImageUrl;
 
+      // Determine post type - default to 'image' (feed post), or 'story' for Stories
+      const finalPostType = postType?.toLowerCase() === 'story' ? 'story' : 'image';
+      const isStory = finalPostType === 'story';
+
       console.log('📅 [SCHEDULE] Params:', JSON.stringify(params));
       console.log('📅 [SCHEDULE] Context lastImageUrl:', lastImageUrl);
       console.log('📅 [SCHEDULE] Final imageUrl:', imageUrl);
+      console.log('📅 [SCHEDULE] Post type:', finalPostType, isStory ? '(Story)' : '(Feed)');
 
       if (!userId) {
          return { success: false, error: 'userId is required', message: 'Please log in first.' };
@@ -126,16 +136,16 @@ const schedulePostTool = {
             }
          }
 
-         console.log('📅 [SCHEDULE] Calling schedulerService.schedulePost with accountId:', accountId);
+         console.log('📅 [SCHEDULE] Calling schedulerService.schedulePost with accountId:', accountId, 'postType:', finalPostType);
          const post = await schedulerService.schedulePost(userId, {
             socialAccountId: accountId,
             imageUrl,
-            caption: caption || 'Posted with Velos AI ✨',
-            hashtags: hashtags || '',
+            caption: isStory ? '' : (caption || 'Posted with Velos AI ✨'), // Stories don't have captions
+            hashtags: isStory ? '' : (hashtags || ''), // Stories don't have hashtags
             scheduledAt: parsedTime,
-            postType: 'image'
+            postType: finalPostType
          });
-         console.log('📅 [SCHEDULE] Post created:', post?._id);
+         console.log('📅 [SCHEDULE] Post created:', post?._id, 'Type:', finalPostType);
 
          const scheduledDate = new Date(parsedTime);
          const timeStr = scheduledDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -146,6 +156,13 @@ const schedulePostTool = {
          // Build opinionated reasoning (micro-decisions)
          const decisions = [];
          const isImmediate = scheduledTime === 'now' || scheduledTime === 'immediately';
+
+         // Add post type decision
+         decisions.push({
+            type: 'format',
+            value: isStory ? 'Instagram Story' : 'Feed Post',
+            reason: isStory ? 'Story for quick, ephemeral engagement' : 'Feed post for lasting visibility'
+         });
 
          if (isImmediate) {
             decisions.push({
@@ -169,7 +186,7 @@ const schedulePostTool = {
             });
          }
 
-         if (caption && caption.length > 50) {
+         if (!isStory && caption && caption.length > 50) {
             decisions.push({
                type: 'caption',
                value: 'optimized caption',
@@ -177,19 +194,29 @@ const schedulePostTool = {
             });
          }
 
-         // Generate smart suggestions
-         const suggestions = [
+         // Generate smart suggestions based on post type
+         const suggestions = isStory ? [
+            'Want me to also post this to your feed for more lasting visibility?',
+            'I can schedule more stories throughout the day for consistent engagement.',
+            'Should I add interactive elements like polls or questions to your next story?'
+         ] : [
             'Want me to schedule the same content for another account?',
             'I can create carousel posts for higher engagement if you have more images.',
             'Should I schedule follow-up content to boost this post\'s reach?'
          ];
 
+         const postTypeLabel = isStory ? 'Story' : 'Post';
+         const messageText = isStory
+            ? `Story scheduled for ${timeStr}! It will be published to ${accountUsername || 'your default account'}'s Instagram Story.`
+            : `Post scheduled for ${timeStr}! It will be published to ${accountUsername || 'your default account'}.`;
+
          return {
             success: true,
             postId: post._id,
+            postType: finalPostType,
             scheduledAt: parsedTime,
             status: post.status,
-            message: `Post scheduled for ${timeStr}! It will be published to ${accountUsername || 'your default account'}.`,
+            message: messageText,
             // Cognitive Layer
             cognitive: {
                thinkingSteps,

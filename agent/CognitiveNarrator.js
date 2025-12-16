@@ -106,7 +106,7 @@ class CognitiveNarrator {
       this.reset();
 
       this.addStep('strategist', 'Understanding edit requirements');
-      
+
       if (context.referenceImages?.length > 0) {
          this.addStep('editor', `Preparing ${context.referenceImages.length} image${context.referenceImages.length > 1 ? 's' : ''} for modification`);
       } else if (context.lastImageUrl) {
@@ -138,15 +138,18 @@ class CognitiveNarrator {
    narrateScheduling(params) {
       this.reset();
 
-      this.addStep('growth', 'Preparing post for Instagram');
-      
+      const isStory = params.postType?.toLowerCase() === 'story';
+      const contentType = isStory ? 'Story' : 'post';
+
+      this.addStep('growth', isStory ? 'Preparing Story for Instagram' : 'Preparing post for Instagram');
+
       if (params.scheduledTime === 'now' || params.scheduledTime === 'immediately') {
-         this.addStep('growth', 'Optimizing for immediate publishing');
+         this.addStep('growth', `Optimizing ${contentType} for immediate publishing`);
       } else {
-         this.addStep('growth', 'Scheduling for optimal engagement time');
+         this.addStep('growth', `Scheduling ${contentType} for optimal engagement time`);
       }
 
-      this.addStep('reviewer', 'Final quality check before publishing');
+      this.addStep('reviewer', `Final quality check before publishing ${contentType}`);
 
       return this.getSteps();
    }
