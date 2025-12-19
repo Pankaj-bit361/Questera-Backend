@@ -321,14 +321,15 @@ class ImageController {
             const chatId = imageChatId || 'chat-' + uuidv4();
             const messageId = 'm' + uuidv4();
 
+            // Use originalMessage if provided, otherwise fall back to prompt (needed for credit log)
+            const displayMessage = originalMessage || prompt;
+
             // Only save messages if not skipped (agent route handles saving separately for proper order)
             let userMessage = null;
             let assistantMessage = null;
 
             if (!skipSaveMessages) {
                 console.log('💾 [GENERATE] Saving user message...');
-                // Use originalMessage if provided, otherwise fall back to prompt
-                const displayMessage = originalMessage || prompt;
                 userMessage = await ImageMessage.create({
                     role: 'user',
                     userId,

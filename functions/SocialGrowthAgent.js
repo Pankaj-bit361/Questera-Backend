@@ -77,7 +77,7 @@ You must respond with ONLY valid JSON, no explanation:
 class SocialGrowthAgent {
   constructor() {
     this.llm = new OpenRouterProvider({
-      model: 'x-ai/grok-4.1-fast',
+      model: 'google/gemini-3-flash-preview',
     });
   }
 

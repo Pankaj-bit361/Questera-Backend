@@ -15,6 +15,7 @@ const analyticsRouter = require('./routes/Analytics');
 const viralRouter = require('./routes/ViralContent');
 const agentRouter = require('./routes/Agent');
 const autopilotRouter = require('./routes/Autopilot');
+const videoRouter = require('./routes/Video');
 const authMiddleware = require('./middlewares/auth');
 const connectDB = require('./db');
 const SchedulerController = require('./functions/Scheduler');
@@ -56,6 +57,7 @@ app.use('/api/analytics', analyticsRouter); // Analytics Dashboard
 app.use('/api/viral', viralRouter); // Viral Content Extraction
 app.use('/api/agent', agentRouter); // AI Agent
 app.use('/api/autopilot', autopilotRouter); // Autopilot System
+app.use('/api/video', videoRouter); // Video Generation
 
 // Database connection and Server Start
 const startServer = async () => {

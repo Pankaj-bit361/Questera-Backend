@@ -1,11 +1,13 @@
 const ScheduledPost = require('../models/scheduledPost');
 const InstagramController = require('./Instagram');
 const EmailService = require('./EmailService');
+const ContentEngine = require('./ContentEngine');
 
 class SchedulerController {
   constructor() {
     this.instagramController = new InstagramController();
     this.emailService = new EmailService();
+    this.contentEngine = new ContentEngine();
   }
 
   /**
@@ -71,6 +73,170 @@ class SchedulerController {
   }
 
   /**
+   * Schedule a video/reel post with auto-generated viral caption and hashtags
+   * Now uses Gemini to ANALYZE the actual video for better captions
+   */
+  async scheduleVideo(req) {
+    try {
+      const {
+        userId,
+        videoUrl,
+        videoChatId,
+        prompt, // Video generation prompt - used for caption generation
+        platform = 'instagram',
+        accountId,
+        scheduledAt,
+        timezone = 'UTC',
+        customCaption, // User can override auto-generated caption
+        customHashtags, // User can override auto-generated hashtags
+        postType = 'reel', // 'reel' or 'story'
+        tone = 'brand', // 'brand', 'creator', 'marketing', 'story'
+      } = req.body;
+
+      if (!userId || !videoUrl || !scheduledAt) {
+        return { status: 400, json: { error: 'userId, videoUrl, and scheduledAt are required' } };
+      }
+
+      const scheduledDate = new Date(scheduledAt);
+      if (scheduledDate <= new Date()) {
+        return { status: 400, json: { error: 'Scheduled time must be in the future' } };
+      }
+
+      console.log('🎬 [SCHEDULER] Scheduling video for', scheduledDate);
+      console.log('📝 [SCHEDULER] Video URL:', videoUrl?.slice(0, 50) + '...');
+      console.log('🎯 [SCHEDULER] Tone:', tone);
+
+      // Generate viral caption and hashtags if not provided
+      let caption = customCaption || '';
+      let hashtags = customHashtags || '';
+
+      if (!customCaption || !customHashtags) {
+        console.log('✨ [SCHEDULER] Generating caption by analyzing actual video...');
+        try {
+          // Pass videoUrl for Gemini to analyze the actual video content
+          const viralContent = await this.contentEngine.generateViralVideoContent(
+            prompt || 'AI-generated creative video',
+            { platform, tone, videoUrl } // Pass videoUrl for video analysis!
+          );
+
+          if (!customCaption) {
+            caption = `${viralContent.hook || ''}\n\n${viralContent.caption || ''}\n\n${viralContent.callToAction || ''}`.trim();
+          }
+          if (!customHashtags) {
+            hashtags = viralContent.hashtagString || '';
+          }
+
+          console.log('✅ [SCHEDULER] Generated viral content:', {
+            captionLength: caption.length,
+            hashtagCount: (hashtags.match(/#/g) || []).length,
+            viralScore: viralContent.viralScore,
+          });
+        } catch (err) {
+          console.warn('⚠️ [SCHEDULER] Failed to generate viral content:', err.message);
+          // Use fallback caption
+          caption = caption || 'Check this out! 🔥\n\nFollow for more amazing content ✨';
+          hashtags = hashtags || '#reels #viral #explore #fyp #trending #content #creator';
+        }
+      }
+
+      // Create the scheduled post
+      // NOTE: Don't set imageUrl to videoUrl - it breaks thumbnail display
+      const post = await ScheduledPost.create({
+        userId,
+        videoUrl,
+        // imageUrl: null for video posts - frontend handles this
+        videoChatId,
+        caption,
+        hashtags,
+        platform,
+        accountId,
+        scheduledAt: scheduledDate,
+        timezone,
+        postType, // 'reel' or 'story'
+        status: 'scheduled',
+      });
+
+      console.log('📅 [SCHEDULER] Video scheduled:', post.postId, 'for', scheduledDate);
+
+      // Send email notification
+      this.emailService.sendPostScheduledEmail(userId, post).catch(err => {
+        console.error('❌ [SCHEDULER] Failed to send scheduled email:', err);
+      });
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          message: 'Video scheduled successfully',
+          post: {
+            postId: post.postId,
+            videoUrl: post.videoUrl,
+            caption: post.caption,
+            hashtags: post.hashtags,
+            platform: post.platform,
+            postType: post.postType,
+            scheduledAt: post.scheduledAt,
+            status: post.status,
+          },
+        },
+      };
+    } catch (error) {
+      console.error('❌ [SCHEDULER] Error scheduling video:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
+   * Generate caption preview by analyzing actual video with Gemini
+   */
+  async generateVideoCaption(req) {
+    try {
+      const { prompt, platform = 'instagram', videoUrl, tone = 'brand' } = req.body;
+
+      if (!prompt && !videoUrl) {
+        return { status: 400, json: { error: 'prompt or videoUrl is required' } };
+      }
+
+      console.log('✨ [SCHEDULER] Generating caption preview...');
+      console.log('🎬 [SCHEDULER] Video URL:', videoUrl ? videoUrl.slice(0, 50) + '...' : 'none');
+      console.log('🎯 [SCHEDULER] Tone:', tone);
+
+      const viralContent = await this.contentEngine.generateViralVideoContent(
+        prompt || 'AI-generated video',
+        { platform, tone, videoUrl } // Pass videoUrl for video analysis!
+      );
+
+      // Build caption based on tone
+      let fullCaption;
+      if (tone === 'brand') {
+        // Clean, professional - no CTA
+        fullCaption = `${viralContent.hook || ''}\n\n${viralContent.caption || ''}`.trim();
+      } else {
+        // Creator/marketing - include CTA
+        fullCaption = `${viralContent.hook || ''}\n\n${viralContent.caption || ''}\n\n${viralContent.callToAction || ''}`.trim();
+      }
+
+      return {
+        status: 200,
+        json: {
+          success: true,
+          hook: viralContent.hook,
+          caption: fullCaption,
+          hashtags: viralContent.hashtagString,
+          suggestedAudio: viralContent.suggestedAudio,
+          bestPostingTimes: viralContent.bestPostingTimes,
+          viralScore: viralContent.viralScore,
+          tips: viralContent.tips,
+          videoAnalysis: viralContent.videoAnalysis || null, // Include analysis if available
+        },
+      };
+    } catch (error) {
+      console.error('❌ [SCHEDULER] Error generating caption:', error);
+      return { status: 500, json: { error: error.message } };
+    }
+  }
+
+  /**
    * Get all scheduled posts for a user (for calendar view)
    */
   async getScheduledPosts(req) {
@@ -101,6 +267,8 @@ class SchedulerController {
           posts: posts.map(p => ({
             postId: p.postId,
             imageUrl: p.imageUrl,
+            videoUrl: p.videoUrl,
+            postType: p.postType,
             caption: p.caption,
             hashtags: p.hashtags,
             platform: p.platform,
@@ -231,22 +399,54 @@ class SchedulerController {
    */
   async publishPost(post) {
     console.log(`📤 [SCHEDULER] Publishing post ${post.postId} to ${post.platform}...`);
+    console.log(`📋 [SCHEDULER] Post details: postType=${post.postType}, videoUrl=${post.videoUrl?.slice(0, 50)}, imageUrl=${post.imageUrl?.slice(0, 50)}`);
 
     if (post.platform === 'instagram') {
       let result;
 
-      // Check if this is a Story or regular post
+      // Check post type and route to appropriate method
       if (post.postType === 'story') {
         console.log('📖 [SCHEDULER] Publishing as Instagram Story...');
+        const mediaUrl = post.videoUrl || post.imageUrl;
         result = await this.instagramController.publishStory({
           body: {
             userId: post.userId,
-            imageUrl: post.imageUrl,
+            imageUrl: mediaUrl,
+            accountId: post.accountId,
+          },
+        });
+      } else if (post.postType === 'carousel' && post.imageUrls?.length > 1) {
+        // Carousel post with multiple images
+        console.log('🎠 [SCHEDULER] Publishing as Instagram Carousel...');
+        result = await this.instagramController.publishCarousel({
+          body: {
+            userId: post.userId,
+            imageUrls: post.imageUrls,
+            caption: post.fullCaption,
+            accountId: post.accountId,
+          },
+        });
+      } else if (post.postType === 'reel' || post.postType === 'video') {
+        // Video/Reel post
+        console.log('🎬 [SCHEDULER] Publishing as Instagram Reel...');
+        const videoUrl = post.videoUrl || post.imageUrl;
+        if (!videoUrl) {
+          throw new Error('videoUrl is required for Reel posts');
+        }
+        result = await this.instagramController.publishReel({
+          body: {
+            userId: post.userId,
+            videoUrl: videoUrl,
+            caption: post.fullCaption,
             accountId: post.accountId,
           },
         });
       } else {
-        // Regular feed post
+        // Regular image feed post
+        console.log('📸 [SCHEDULER] Publishing as Instagram Image...');
+        if (!post.imageUrl) {
+          throw new Error('imageUrl is required for Image posts');
+        }
         result = await this.instagramController.publishImage({
           body: {
             userId: post.userId,
@@ -263,6 +463,29 @@ class SchedulerController {
         post.publishedMediaId = result.json.mediaId;
         post.platformPostUrl = result.json.permalink; // Store permalink for analytics matching
         await post.save();
+
+        // Post first comment if provided
+        if (post.firstComment && result.json.mediaId) {
+          console.log('💬 [SCHEDULER] Posting first comment...');
+          try {
+            const commentResult = await this.instagramController.postComment({
+              body: {
+                userId: post.userId,
+                mediaId: result.json.mediaId,
+                comment: post.firstComment,
+                accountId: post.accountId,
+              },
+            });
+            if (commentResult.json.success) {
+              console.log('✅ [SCHEDULER] First comment posted successfully');
+            } else {
+              console.log('⚠️ [SCHEDULER] First comment failed:', commentResult.json.error);
+            }
+          } catch (commentErr) {
+            console.log('⚠️ [SCHEDULER] Failed to post first comment:', commentErr.message);
+            // Don't fail the whole post for comment failure
+          }
+        }
 
         // Handle recurring posts - create next occurrence
         if (post.isRecurring && post.frequency !== 'once') {

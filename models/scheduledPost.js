@@ -15,11 +15,17 @@ const scheduledPostSchema = new mongoose.Schema({
   // Content
   imageUrl: {
     type: String,
-    required: true,
+    required: false, // Not required for video posts
   },
   imageUrls: [{
     type: String, // For carousel posts
   }],
+  videoUrl: {
+    type: String, // For video/reel posts
+  },
+  videoChatId: {
+    type: String, // Reference to video chat
+  },
   caption: {
     type: String,
     default: '',
@@ -32,6 +38,19 @@ const scheduledPostSchema = new mongoose.Schema({
     type: String,
     enum: ['image', 'carousel', 'video', 'reel', 'story'],
     default: 'image',
+  },
+  // Buffer-like features
+  music: {
+    type: String,
+    default: '',
+  },
+  tagProducts: {
+    type: String,
+    default: '',
+  },
+  firstComment: {
+    type: String,
+    default: '',
   },
   // Campaign reference
   campaignId: {

@@ -2,6 +2,7 @@ const AgentExecutor = require('./AgentExecutor');
 const ToolRegistry = require('./ToolRegistry');
 const { LLMProvider, OpenRouterProvider, AnthropicProvider } = require('./LLMProvider');
 const { ImageAgent, createImageAgent } = require('./ImageAgent');
+const VideoAgent = require('./VideoAgent');
 const RouterAgent = require('./RouterAgent');
 const PromptValidator = require('./PromptValidator');
 const { FailureHandler, FAILURE_RESPONSES } = require('./FailureResponses');
@@ -68,6 +69,7 @@ module.exports = {
    OpenRouterProvider,
    AnthropicProvider,
    ImageAgent,
+   VideoAgent,
    createAgent,
    createImageAgent,
    defineTool,

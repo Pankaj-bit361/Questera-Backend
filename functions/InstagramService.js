@@ -346,6 +346,144 @@ class InstagramService {
   }
 
   /**
+   * Post a Reel (video) to Instagram
+   * Uses the Reels API for video content
+   * Video must be accessible via public URL
+   */
+  async postReel(socialAccountId, videoUrl, caption, options = {}) {
+    const account = await SocialAccount.findOne({ accountId: socialAccountId, platform: 'instagram' });
+
+    if (!account || !account.isActive) {
+      throw new Error('Instagram account not found or inactive');
+    }
+
+    const igAccountId = account.instagramBusinessAccountId;
+    const accessToken = account.facebookPageAccessToken || account.accessToken;
+
+    console.log('🎬 [INSTAGRAM] Creating Reel container...');
+    console.log('📹 [INSTAGRAM] Video URL:', videoUrl);
+
+    // Step 1: Create video container for Reel
+    const containerParams = {
+      video_url: videoUrl,
+      media_type: 'REELS',
+      caption: caption,
+      access_token: accessToken,
+      share_to_feed: options.shareToFeed !== false, // Default: true
+    };
+
+    // Optional: Add cover image
+    if (options.coverUrl) {
+      containerParams.cover_url = options.coverUrl;
+    }
+
+    // Optional: Add thumbnail time offset (in ms)
+    if (options.thumbOffset) {
+      containerParams.thumb_offset = options.thumbOffset;
+    }
+
+    const containerResponse = await axios.post(
+      `${this.baseUrl}/${igAccountId}/media`,
+      null,
+      { params: containerParams }
+    );
+
+    const containerId = containerResponse.data.id;
+    console.log('📦 [INSTAGRAM] Reel container created:', containerId);
+
+    // Step 2: Wait for video processing (videos take longer than images)
+    await this.waitForContainerReady(containerId, accessToken, 30); // 30 attempts = ~60 seconds max
+
+    // Step 3: Publish the Reel
+    console.log('🚀 [INSTAGRAM] Publishing Reel...');
+    const publishResponse = await axios.post(
+      `${this.baseUrl}/${igAccountId}/media_publish`,
+      null,
+      {
+        params: {
+          creation_id: containerId,
+          access_token: accessToken,
+        },
+      }
+    );
+
+    const mediaId = publishResponse.data.id;
+    console.log('✅ [INSTAGRAM] Reel published! Media ID:', mediaId);
+
+    // Get permalink
+    const mediaInfo = await this.getMediaInfo(mediaId, accessToken);
+
+    return {
+      success: true,
+      mediaId,
+      permalink: mediaInfo.permalink,
+      timestamp: mediaInfo.timestamp,
+      type: 'reel',
+    };
+  }
+
+  /**
+   * Post a Story (image or video)
+   */
+  async postStory(socialAccountId, mediaUrl, isVideo = false) {
+    const account = await SocialAccount.findOne({ accountId: socialAccountId, platform: 'instagram' });
+
+    if (!account || !account.isActive) {
+      throw new Error('Instagram account not found or inactive');
+    }
+
+    const igAccountId = account.instagramBusinessAccountId;
+    const accessToken = account.facebookPageAccessToken || account.accessToken;
+
+    console.log('📖 [INSTAGRAM] Creating Story container...');
+
+    const containerParams = {
+      media_type: 'STORIES',
+      access_token: accessToken,
+    };
+
+    if (isVideo) {
+      containerParams.video_url = mediaUrl;
+    } else {
+      containerParams.image_url = mediaUrl;
+    }
+
+    const containerResponse = await axios.post(
+      `${this.baseUrl}/${igAccountId}/media`,
+      null,
+      { params: containerParams }
+    );
+
+    const containerId = containerResponse.data.id;
+    console.log('📦 [INSTAGRAM] Story container created:', containerId);
+
+    // Wait for processing
+    await this.waitForContainerReady(containerId, accessToken, isVideo ? 30 : 10);
+
+    // Publish
+    console.log('🚀 [INSTAGRAM] Publishing Story...');
+    const publishResponse = await axios.post(
+      `${this.baseUrl}/${igAccountId}/media_publish`,
+      null,
+      {
+        params: {
+          creation_id: containerId,
+          access_token: accessToken,
+        },
+      }
+    );
+
+    const mediaId = publishResponse.data.id;
+    console.log('✅ [INSTAGRAM] Story published! Media ID:', mediaId);
+
+    return {
+      success: true,
+      mediaId,
+      type: 'story',
+    };
+  }
+
+  /**
    * Get engagement metrics for a post
    */
   async getPostInsights(mediaId, accessToken) {

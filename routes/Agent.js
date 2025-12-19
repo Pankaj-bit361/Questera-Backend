@@ -46,10 +46,32 @@ async function saveMessage(chatId, userId, role, content, images = []) {
       userId
    };
 
-   // Add images if provided
+   // Add images if provided - handle both URL strings and base64 data objects
    if (images && images.length > 0) {
-      msgData.imageUrl = images[0]; // Primary image
-      msgData.referenceImages = images; // All images
+      // Filter and process images - only save URLs, not base64 data
+      const processedImages = images
+         .map(img => {
+            // If it's already a URL string, use it
+            if (typeof img === 'string' && (img.startsWith('http') || img.startsWith('data:'))) {
+               return img;
+            }
+            // If it's an object with a URL, use the URL
+            if (img && typeof img === 'object' && img.url && typeof img.url === 'string') {
+               return img.url;
+            }
+            // Skip base64 data objects - they're too large to store and are temporary uploads
+            if (img && typeof img === 'object' && img.data) {
+               console.log('[SAVE_MESSAGE] Skipping base64 image data (too large for DB)');
+               return null;
+            }
+            return null;
+         })
+         .filter(Boolean);
+
+      if (processedImages.length > 0) {
+         msgData.imageUrl = processedImages[0]; // Primary image
+         msgData.referenceImages = processedImages; // All images
+      }
    }
 
    const msg = await ImageMessage.create(msgData);

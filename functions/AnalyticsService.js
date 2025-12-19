@@ -50,6 +50,8 @@ class AnalyticsService {
       .map(p => ({
         postId: p.postId,
         imageUrl: p.imageUrl,
+        videoUrl: p.videoUrl,
+        postType: p.postType,
         caption: p.caption?.substring(0, 100),
         publishedAt: p.publishedAt,
         engagement: p.engagement,

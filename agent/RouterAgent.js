@@ -81,7 +81,7 @@ const ACTION_INTENTS = ['generate_image', 'generate_and_post', 'edit_image', 'sc
 class RouterAgent {
    constructor(options = {}) {
       this.llm = new OpenRouterProvider({
-         model: options.model || 'x-ai/grok-4.1-fast'
+         model: options.model || 'google/gemini-3-flash-preview'
       });
    }
 

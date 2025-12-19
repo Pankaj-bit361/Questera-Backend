@@ -1,5 +1,6 @@
 const { GoogleGenAI } = require('@google/genai');
 const OpenRouterLLM = require('./OpenRouterLLM');
+const axios = require('axios');
 
 /**
  * Helper to clean JSON from markdown code blocks and extract JSON
@@ -299,6 +300,235 @@ OUTPUT FORMAT (JSON):
   async generateCaptions(designBrief, imageDescriptions = [], context = {}) {
     // Use the new viral content generator
     return this.generateViralPostContent(designBrief, imageDescriptions, context);
+  }
+
+  /**
+   * Generate brand-appropriate caption by ANALYZING the actual video with Gemini
+   * Sends video to Gemini 3 Flash which can understand video content
+   */
+  async generateViralVideoContent(videoDescriptionOrUrl, context = {}) {
+    const {
+      platform = 'instagram',
+      tone = 'brand', // 'brand', 'creator', 'marketing', 'story'
+      niche = '',
+      duration = 8,
+      videoUrl = null // Actual video URL to analyze
+    } = context;
+
+    // Determine if we should analyze video or just use description
+    const actualVideoUrl = videoUrl || (videoDescriptionOrUrl?.startsWith('http') ? videoDescriptionOrUrl : null);
+
+    let videoAnalysis = null;
+
+    // If we have a video URL, analyze it with Gemini
+    if (actualVideoUrl) {
+      try {
+        console.log('🎬 [ContentEngine] Analyzing video with Gemini:', actualVideoUrl.slice(0, 50));
+        videoAnalysis = await this.analyzeVideoWithGemini(actualVideoUrl);
+        console.log('✅ [ContentEngine] Video analysis:', videoAnalysis?.summary?.slice(0, 100));
+      } catch (error) {
+        console.error('⚠️ [ContentEngine] Video analysis failed, using description:', error.message);
+      }
+    }
+
+    const videoContext = videoAnalysis
+      ? `VIDEO ANALYSIS (from actual video):
+- Visual Content: ${videoAnalysis.summary}
+- Key Elements: ${videoAnalysis.keyElements?.join(', ') || 'N/A'}
+- Style: ${videoAnalysis.style || 'N/A'}
+- Brand Elements: ${videoAnalysis.brandElements || 'N/A'}
+- Mood: ${videoAnalysis.mood || 'N/A'}`
+      : `VIDEO DESCRIPTION: ${videoDescriptionOrUrl}`;
+
+    // Tone-specific instructions
+    const toneGuides = {
+      brand: `BRAND TONE GUIDELINES:
+- Professional and polished
+- Minimal emojis (1-2 max)
+- Focus on brand value and identity
+- No engagement bait ("tag a friend", "save this")
+- Clean, elegant hashtags (5-8 max)
+- Emphasize quality and expertise`,
+
+      creator: `CREATOR TONE GUIDELINES:
+- Casual and relatable
+- Emojis welcome
+- Engagement hooks encouraged
+- CTAs like "save", "share", "follow"
+- 15-20 hashtags for reach`,
+
+      marketing: `MARKETING TONE GUIDELINES:
+- Clear value proposition
+- Professional but approachable
+- Focus on benefits
+- Subtle CTA (link in bio, learn more)
+- 8-12 strategic hashtags`,
+
+      story: `STORYTELLING TONE GUIDELINES:
+- Narrative and emotional
+- Draw viewer into the story
+- Create connection
+- Minimal hashtags (5-7)
+- Focus on message over reach`
+    };
+
+    const systemPrompt = `You are a professional social media strategist for brands and businesses.
+Analyze the video content and generate an appropriate caption for ${platform}.
+
+${videoContext}
+
+CONTEXT:
+- Platform: ${platform}
+- Tone: ${tone}
+- Niche: ${niche || 'brand/business'}
+- Duration: ~${duration} seconds
+
+${toneGuides[tone] || toneGuides.brand}
+
+OUTPUT FORMAT (JSON):
+{
+  "hook": "Opening line - concise, professional (under 60 chars)",
+  "caption": "Full caption appropriate for the tone. For brand: clean and professional. For creator: engaging with emojis",
+  "callToAction": "Appropriate CTA for the tone (or null for brand tone)",
+  "hashtags": {
+    "primary": ["3-5 most relevant hashtags for the content"],
+    "secondary": ["3-5 supporting hashtags"],
+    "branded": ["1-2 brand-specific if applicable"]
+  },
+  "hashtagString": "All hashtags as one string",
+  "suggestedAudio": "Audio suggestion or 'Original audio'",
+  "bestPostingTimes": ["optimal times"],
+  "viralScore": 1-10,
+  "tips": ["content-specific tips based on video analysis"]
+}`;
+
+    try {
+      return await this.openRouter.generateJSON(systemPrompt, {
+        temperature: 0.7,
+        fallback: this.getFallbackVideoContent(videoDescriptionOrUrl, tone)
+      });
+    } catch (error) {
+      console.error('Error generating video content:', error);
+      return this.getFallbackVideoContent(videoDescriptionOrUrl, tone);
+    }
+  }
+
+  /**
+   * Analyze video content using OpenRouter + Gemini (multimodal)
+   * Downloads video from S3 and sends as base64 to OpenRouter
+   */
+  async analyzeVideoWithGemini(videoUrl) {
+    try {
+      console.log('📥 [ContentEngine] Downloading video for analysis...');
+
+      // Download video and convert to base64
+      const response = await axios.get(videoUrl, {
+        responseType: 'arraybuffer',
+        timeout: 60000, // 60s timeout for video download
+        maxContentLength: 50 * 1024 * 1024 // 50MB max
+      });
+
+      const base64Video = Buffer.from(response.data).toString('base64');
+      const dataUrl = `data:video/mp4;base64,${base64Video}`;
+
+      console.log('🎬 [ContentEngine] Video downloaded, size:', Math.round(base64Video.length / 1024), 'KB');
+
+      const prompt = `Analyze this video for social media caption generation.
+
+Provide a JSON response:
+{
+  "summary": "Brief description of what happens in the video (2-3 sentences)",
+  "keyElements": ["list", "of", "key", "visual", "elements"],
+  "style": "visual style (cinematic, minimal, animated, professional, casual, etc.)",
+  "brandElements": "any logos, text, brand colors visible (or 'none')",
+  "mood": "emotional tone (elegant, energetic, calm, exciting, professional, etc.)",
+  "contentType": "logo animation, product demo, testimonial, tutorial, etc.",
+  "suggestedCategory": "marketing, entertainment, education, inspiration, etc."
+}`;
+
+      // Use OpenRouter with video support
+      const result = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+        model: 'google/gemini-2.5-flash',
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'video_url',
+              video_url: { url: dataUrl }
+            }
+          ]
+        }]
+      }, {
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://velosapps.com',
+          'X-Title': 'Velos Video Analysis'
+        },
+        timeout: 120000 // 2 min timeout for AI processing
+      });
+
+      const text = result.data?.choices?.[0]?.message?.content || '';
+      console.log('✅ [ContentEngine] Video analysis complete');
+
+      return safeJsonParse(text, {
+        summary: 'Video content analysis unavailable',
+        keyElements: [],
+        style: 'professional',
+        brandElements: 'none',
+        mood: 'professional'
+      });
+    } catch (error) {
+      console.error('❌ [ContentEngine] Video analysis error:', error.response?.data || error.message);
+      throw error;
+    }
+  }
+
+  /**
+   * Fallback video content if AI fails - tone-aware
+   */
+  getFallbackVideoContent(videoDescription, tone = 'brand') {
+    // Brand-appropriate fallback (professional, minimal)
+    if (tone === 'brand') {
+      return {
+        hook: videoDescription?.slice(0, 60) || 'Crafted with precision.',
+        caption: videoDescription || 'Where quality meets innovation.',
+        callToAction: null,
+        hashtags: {
+          primary: ['brand', 'quality', 'design'],
+          secondary: ['professional', 'creative'],
+          branded: []
+        },
+        hashtagString: '#brand #quality #design #professional #creative',
+        suggestedAudio: 'Original audio',
+        bestPostingTimes: ['9:00 AM', '12:00 PM', '6:00 PM'],
+        viralScore: 6,
+        tips: ['Keep captions professional', 'Focus on brand value', 'Use high-quality thumbnails']
+      };
+    }
+
+    // Creator-style fallback (engaging, emoji-heavy)
+    const hook = 'Wait for it... 🔥';
+    const caption = `${hook}\n\n${videoDescription || 'This is incredible ✨'}\n\nFollow for more! 👉`;
+    const callToAction = 'Save this 🔖 Tag someone who needs to see this 👇';
+    const hashtagString = '#reels #reelsviral #explorepage #viral #trending #fyp #foryou #reelsinstagram #viralreels #explore #instagood #instadaily #content #creator #aigenerated #aiart #videography #creative';
+
+    return {
+      hook,
+      caption,
+      callToAction,
+      hashtags: {
+        primary: ['viral', 'trending', 'fyp', 'foryou', 'explore'],
+        secondary: ['reels', 'reelsviral', 'explorepage', 'reelsinstagram', 'viralreels'],
+        branded: []
+      },
+      hashtagString,
+      suggestedAudio: 'Original audio',
+      bestPostingTimes: ['7:00 AM', '12:00 PM', '7:00 PM', '9:00 PM'],
+      viralScore: 7,
+      tips: ['Post during peak hours', 'Reply to comments quickly', 'Share to Stories', 'Use trending audio if possible']
+    };
   }
 
   /**

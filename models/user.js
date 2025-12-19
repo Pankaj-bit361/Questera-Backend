@@ -41,6 +41,10 @@ const userSchema = new mongoose.Schema({
     lastLogin: {
         type: Date,
     },
+    credits: {
+        image: { type: Number, default: 10 },
+        video: { type: Number, default: 3 },
+    },
 }, { timestamps: true });
 
 const User = mongoose.model('User', userSchema);

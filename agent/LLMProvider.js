@@ -18,7 +18,7 @@ class OpenRouterProvider extends LLMProvider {
       super(config);
       this.apiKey = config.apiKey || process.env.OPENROUTER_API_KEY;
       this.baseUrl = 'https://openrouter.ai/api/v1/chat/completions';
-      this.model = config.model || 'x-ai/grok-4.1-fast';
+      this.model = config.model || 'google/gemini-3-flash-preview';
    }
 
    async chat(messages, options = {}) {

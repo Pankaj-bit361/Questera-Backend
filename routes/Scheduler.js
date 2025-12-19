@@ -2,8 +2,36 @@ const express = require('express');
 const schedulerRouter = express.Router();
 const SchedulerController = require('../functions/Scheduler');
 const SchedulerService = require('../functions/SchedulerService');
+const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
+const { v4: uuidv4 } = require('uuid');
 const schedulerController = new SchedulerController();
 const schedulerService = new SchedulerService();
+
+// S3 client for image uploads
+const s3 = new S3Client({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
+const bucketName = process.env.AWS_S3_BUCKET_NAME;
+
+// Helper to upload base64 image to S3
+async function uploadToS3(base64Data, mimeType, folder = 'scheduler') {
+  const extension = mimeType?.split('/')[1] || 'png';
+  const fileName = `${folder}/${uuidv4()}.${extension}`;
+  const buffer = Buffer.from(base64Data, 'base64');
+
+  await s3.send(new PutObjectCommand({
+    Bucket: bucketName,
+    Key: fileName,
+    Body: buffer,
+    ContentType: mimeType,
+  }));
+
+  return `https://${bucketName}.s3.${process.env.AWS_REGION}.amazonaws.com/${fileName}`;
+}
 
 /**
  * POST /scheduler/posts
@@ -209,6 +237,36 @@ schedulerRouter.post('/bulk', async (req, res) => {
   }
 });
 
+// ============== VIDEO SCHEDULING ==============
+
+/**
+ * POST /scheduler/video
+ * Schedule a video/reel with auto-generated viral caption and hashtags
+ */
+schedulerRouter.post('/video', async (req, res) => {
+  try {
+    const { status, json } = await schedulerController.scheduleVideo(req);
+    return res.status(status).json(json);
+  } catch (error) {
+    console.error('[SCHEDULER] Video Schedule Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /scheduler/video/caption
+ * Generate viral caption preview without scheduling (for UI preview)
+ */
+schedulerRouter.post('/video/caption', async (req, res) => {
+  try {
+    const { status, json } = await schedulerController.generateVideoCaption(req);
+    return res.status(status).json(json);
+  } catch (error) {
+    console.error('[SCHEDULER] Caption Generate Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 // ============== CALENDAR VIEW ==============
 
 /**
@@ -271,6 +329,134 @@ schedulerRouter.post('/posts/:postId/engagement', async (req, res) => {
     return res.status(200).json({ success: true, engagement: post.engagement });
   } catch (error) {
     console.error('[SCHEDULER] Engagement Update Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+// ============== MANUAL POST CREATION (Buffer-style) ==============
+
+/**
+ * POST /scheduler/manual-post
+ * Create a scheduled post with user-uploaded image/video
+ * Supports: Post, Reel, Story, Carousel types
+ * Additional: Music, Tag Products, First Comment
+ */
+schedulerRouter.post('/manual-post', async (req, res) => {
+  try {
+    const {
+      userId,
+      media, // { data: base64, mimeType: 'image/png' } or array for carousel
+      caption,
+      hashtags,
+      postType = 'image', // 'image', 'reel', 'story', 'carousel'
+      scheduledAt,
+      timezone = 'UTC',
+      accountId,
+      // New Buffer-like features
+      music = '',
+      tagProducts = '',
+      firstComment = '',
+    } = req.body;
+
+    // Validate required fields
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    if (!media) {
+      return res.status(400).json({ error: 'media is required (image or video)' });
+    }
+    if (!scheduledAt) {
+      return res.status(400).json({ error: 'scheduledAt is required' });
+    }
+
+    const scheduledDate = new Date(scheduledAt);
+    if (scheduledDate <= new Date()) {
+      return res.status(400).json({ error: 'Scheduled time must be in the future' });
+    }
+
+    let imageUrl = null;
+    let imageUrls = [];
+    let videoUrl = null;
+
+    // Handle different post types
+    if (postType === 'carousel' && Array.isArray(media)) {
+      // Carousel: multiple images
+      for (const item of media) {
+        const url = await uploadToS3(item.data, item.mimeType, 'scheduler/carousel');
+        imageUrls.push(url);
+      }
+      imageUrl = imageUrls[0]; // First image as thumbnail
+    } else if (postType === 'reel' || postType === 'video') {
+      // Video/Reel
+      videoUrl = await uploadToS3(media.data, media.mimeType, 'scheduler/videos');
+    } else if (postType === 'story') {
+      // Story can be image or video
+      const isVideo = media.mimeType?.startsWith('video');
+      if (isVideo) {
+        videoUrl = await uploadToS3(media.data, media.mimeType, 'scheduler/stories');
+      } else {
+        imageUrl = await uploadToS3(media.data, media.mimeType, 'scheduler/stories');
+      }
+    } else {
+      // Regular image post
+      imageUrl = await uploadToS3(media.data, media.mimeType, 'scheduler/posts');
+    }
+
+    // Create the scheduled post using SchedulerService
+    const postData = {
+      socialAccountId: accountId,
+      imageUrl,
+      imageUrls: imageUrls.length > 0 ? imageUrls : undefined,
+      videoUrl,
+      caption: caption || '',
+      hashtags: hashtags || '',
+      scheduledAt: scheduledDate,
+      timezone,
+      postType,
+      // Buffer-like features
+      music: music || '',
+      tagProducts: tagProducts || '',
+      firstComment: firstComment || '',
+    };
+
+    const post = await schedulerService.schedulePost(userId, postData);
+
+    console.log(`📅 [SCHEDULER] Created manual post: ${post.postId} (${postType}) for ${scheduledDate}`);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Post scheduled successfully',
+      post,
+    });
+  } catch (error) {
+    console.error('[SCHEDULER] Manual Post Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /scheduler/upload-media
+ * Upload media to S3 and return URL (for preview before scheduling)
+ */
+schedulerRouter.post('/upload-media', async (req, res) => {
+  try {
+    const { media, type = 'image' } = req.body;
+    // media: { data: base64, mimeType: 'image/png' }
+
+    if (!media || !media.data) {
+      return res.status(400).json({ error: 'media with data is required' });
+    }
+
+    const folder = type === 'video' ? 'scheduler/videos' : 'scheduler/uploads';
+    const url = await uploadToS3(media.data, media.mimeType, folder);
+
+    return res.status(200).json({
+      success: true,
+      url,
+      mimeType: media.mimeType,
+    });
+  } catch (error) {
+    console.error('[SCHEDULER] Upload Media Error:', error);
     return res.status(500).json({ error: error.message });
   }
 });
