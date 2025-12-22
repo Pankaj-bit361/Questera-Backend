@@ -15,7 +15,7 @@ class AnalyticsService {
   /**
    * Get dashboard overview for a user
    */
-  async getDashboard(userId, dateRange = 30) {
+  async getDashboard(userId, dateRange = 30, postLimit = 20) {
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - dateRange);
 
@@ -40,14 +40,14 @@ class AnalyticsService {
     // Average engagement per post
     const avgEngagement = totalPosts > 0 ? Math.round(totalEngagement / totalPosts) : 0;
 
-    // Best performing posts
+    // Best performing posts - now with configurable limit (default 20)
     const topPosts = [...posts]
       .sort((a, b) => {
         const engA = (a.engagement?.likes || 0) + (a.engagement?.comments || 0);
         const engB = (b.engagement?.likes || 0) + (b.engagement?.comments || 0);
         return engB - engA;
       })
-      .slice(0, 5)
+      .slice(0, postLimit)
       .map(p => ({
         postId: p.postId,
         imageUrl: p.imageUrl,
@@ -55,6 +55,7 @@ class AnalyticsService {
         postType: p.postType,
         caption: p.caption?.substring(0, 100),
         publishedAt: p.publishedAt,
+        platformPostUrl: p.platformPostUrl,
         engagement: p.engagement,
       }));
 
@@ -255,61 +256,70 @@ class AnalyticsService {
 
   /**
    * Refresh engagement data for recent posts
+   * Now supports MULTIPLE Instagram accounts per user
    */
   async refreshEngagement(userId) {
     const Instagram = require('../models/instagram');
     const SocialAccount = require('../models/socialAccount');
 
-    // Try to find Instagram connection - check both models for backward compatibility
-    let accessToken = null;
+    // Collect ALL Instagram accounts for this user
+    const allAccounts = [];
 
-    // First try the Instagram model (primary connection)
-    const instagramAccount = await Instagram.findOne({ userId, isConnected: true });
-    if (instagramAccount?.accessToken) {
-      accessToken = instagramAccount.accessToken;
-      console.log('[ANALYTICS] Found Instagram connection via Instagram model');
-    }
+    // First check the Instagram model (primary connection)
+    const instagramDocs = await Instagram.find({ userId, isConnected: true });
 
-    // Fallback to SocialAccount model
-    if (!accessToken) {
-      const socialAccount = await SocialAccount.findOne({
-        userId,
-        platform: 'instagram',
-        isActive: true
-      });
-      if (socialAccount) {
-        accessToken = socialAccount.facebookPageAccessToken || socialAccount.accessToken;
-        console.log('[ANALYTICS] Found Instagram connection via SocialAccount model');
+    for (const doc of instagramDocs) {
+      // Check accounts array first (newer structure)
+      if (doc.accounts && doc.accounts.length > 0) {
+        for (const acc of doc.accounts) {
+          if (acc.isConnected !== false && acc.accessToken && acc.instagramBusinessAccountId) {
+            allAccounts.push({
+              username: acc.instagramUsername,
+              accessToken: acc.accessToken,
+              igBusinessId: acc.instagramBusinessAccountId,
+            });
+          }
+        }
+      }
+      // Also check root-level fields
+      if (doc.accessToken && doc.instagramBusinessAccountId) {
+        // Avoid duplicates
+        const exists = allAccounts.some(a => a.igBusinessId === doc.instagramBusinessAccountId);
+        if (!exists) {
+          allAccounts.push({
+            username: doc.instagramUsername,
+            accessToken: doc.accessToken,
+            igBusinessId: doc.instagramBusinessAccountId,
+          });
+        }
       }
     }
 
-    if (!accessToken) {
+    // Also check SocialAccount model
+    const socialAccounts = await SocialAccount.find({
+      userId,
+      platform: 'instagram',
+      isActive: true
+    });
+    for (const sa of socialAccounts) {
+      const token = sa.facebookPageAccessToken || sa.accessToken;
+      if (token && sa.instagramBusinessAccountId) {
+        const exists = allAccounts.some(a => a.igBusinessId === sa.instagramBusinessAccountId);
+        if (!exists) {
+          allAccounts.push({
+            username: sa.username,
+            accessToken: token,
+            igBusinessId: sa.instagramBusinessAccountId,
+          });
+        }
+      }
+    }
+
+    if (allAccounts.length === 0) {
       throw new Error('Instagram not connected. Please connect your Instagram account in Settings.');
     }
 
-    // NEW APPROACH: Fetch all recent media directly from Instagram account
-    // This fixes the issue where stored publishedMediaId might be container IDs instead of actual media IDs
-    const igBusinessId = instagramAccount?.instagramBusinessAccountId;
-
-    if (!igBusinessId) {
-      throw new Error('Instagram Business Account ID not found');
-    }
-
-    console.log(`[ANALYTICS] Fetching media directly from Instagram account ${igBusinessId}`);
-
-    // Fetch recent media from Instagram (up to 50 posts)
-    const mediaListUrl = `https://graph.facebook.com/v20.0/${igBusinessId}/media?` +
-      `fields=id,caption,like_count,comments_count,permalink,timestamp,media_type&limit=50&access_token=${accessToken}`;
-
-    const mediaListResponse = await fetch(mediaListUrl);
-    const mediaListData = await mediaListResponse.json();
-
-    if (mediaListData.error) {
-      throw new Error(`Instagram API error: ${mediaListData.error.message}`);
-    }
-
-    const instagramMedia = mediaListData.data || [];
-    console.log(`[ANALYTICS] Found ${instagramMedia.length} posts on Instagram`);
+    console.log(`[ANALYTICS] Found ${allAccounts.length} Instagram account(s): ${allAccounts.map(a => '@' + a.username).join(', ')}`);
 
     // Get our published posts from database
     const posts = await ScheduledPost.find({
@@ -319,6 +329,37 @@ class AnalyticsService {
     });
 
     console.log(`[ANALYTICS] Found ${posts.length} published posts in database`);
+
+    // Fetch media from ALL Instagram accounts
+    const allInstagramMedia = [];
+    for (const account of allAccounts) {
+      console.log(`[ANALYTICS] Fetching media from @${account.username} (${account.igBusinessId})`);
+
+      const mediaListUrl = `https://graph.facebook.com/v21.0/${account.igBusinessId}/media?` +
+        `fields=id,caption,like_count,comments_count,permalink,timestamp,media_type&limit=100&access_token=${account.accessToken}`;
+
+      const mediaListResponse = await fetch(mediaListUrl);
+      const mediaListData = await mediaListResponse.json();
+
+      if (mediaListData.error) {
+        console.log(`[ANALYTICS] Error fetching @${account.username}: ${mediaListData.error.message}`);
+        continue;
+      }
+
+      const mediaItems = mediaListData.data || [];
+      console.log(`[ANALYTICS] Found ${mediaItems.length} posts on @${account.username}`);
+
+      // Tag each media item with the account info for later use
+      for (const item of mediaItems) {
+        allInstagramMedia.push({
+          ...item,
+          _accountToken: account.accessToken,
+          _accountUsername: account.username,
+        });
+      }
+    }
+
+    console.log(`[ANALYTICS] Total Instagram media collected: ${allInstagramMedia.length}`);
 
     const updated = [];
     const errors = [];
@@ -331,23 +372,23 @@ class AnalyticsService {
 
         // 1. First try matching by stored permalink (most reliable)
         if (post.platformPostUrl) {
-          igMedia = instagramMedia.find(m => m.permalink === post.platformPostUrl);
+          igMedia = allInstagramMedia.find(m => m.permalink === post.platformPostUrl);
           if (igMedia) {
-            console.log(`[ANALYTICS] Matched ${post.postId} by permalink`);
+            console.log(`[ANALYTICS] Matched ${post.postId} by permalink on @${igMedia._accountUsername}`);
           }
         }
 
         // 2. Try matching by timestamp (within 5 minutes - very reliable)
         if (!igMedia && post.publishedAt) {
           const postTime = new Date(post.publishedAt).getTime();
-          igMedia = instagramMedia.find(m => {
+          igMedia = allInstagramMedia.find(m => {
             if (!m.timestamp) return false;
             const igTime = new Date(m.timestamp).getTime();
             const diff = Math.abs(postTime - igTime);
             return diff < 5 * 60 * 1000; // Within 5 minutes
           });
           if (igMedia) {
-            console.log(`[ANALYTICS] Matched ${post.postId} by timestamp (${post.publishedAt})`);
+            console.log(`[ANALYTICS] Matched ${post.postId} by timestamp on @${igMedia._accountUsername}`);
           }
         }
 
@@ -355,6 +396,9 @@ class AnalyticsService {
           console.log(`[ANALYTICS] No match for ${post.postId} published at ${post.publishedAt}`);
           continue;
         }
+
+        // Use the access token from the account that owns this media
+        const accessToken = igMedia._accountToken;
 
         // Update the publishedMediaId if it was wrong
         if (post.publishedMediaId !== igMedia.id) {
@@ -364,7 +408,6 @@ class AnalyticsService {
         }
 
         console.log(`[ANALYTICS] Updating engagement for ${post.postId}...`);
-        console.log(`[ANALYTICS] Likes: ${JSON.stringify(igMedia, null, 2)})` );
 
         let likes = igMedia.like_count || 0;
         let comments = igMedia.comments_count || 0;
@@ -375,67 +418,45 @@ class AnalyticsService {
         let views = 0;
 
         // Try to get insights from Instagram API
-        // NOTE: As of v22.0+, 'impressions' is deprecated. Use 'views' instead.
-        // For images: reach, saved, views (v22+)
-        // For reels/videos: plays, reach, saved, views (v22+)
-        const mediaType = igMedia.media_type;
+        // NOTE: As of v22.0+, 'impressions' and 'plays' are deprecated. Use 'views' instead.
 
-        // Use v21 API which still supports some metrics
-        // v22+ removed impressions, use 'views' instead
-        let metrics = 'reach,saved';
-        if (mediaType === 'VIDEO' || mediaType === 'REELS') {
-          metrics = 'plays,reach,saved';
-        }
-
+        // Step 1: Get reach and saved from v21 API
         const insightsUrl = `https://graph.facebook.com/v21.0/${igMedia.id}/insights?` +
-          `metric=${metrics}&access_token=${accessToken}`;
+          `metric=reach,saved&access_token=${accessToken}`;
 
         const insightsResponse = await fetch(insightsUrl);
         const insightsData = await insightsResponse.json();
 
-        if (insightsData.error) {
-          // Insights may not be available for very recent posts (< 24 hours)
-          console.log(`[ANALYTICS] Insights unavailable for ${post.postId}: ${insightsData.error.message}`);
-
-          // Try to get views using the new v22+ endpoint
-          try {
-            const viewsUrl = `https://graph.facebook.com/v22.0/${igMedia.id}/insights?` +
-              `metric=views&access_token=${accessToken}`;
-            const viewsResponse = await fetch(viewsUrl);
-            const viewsData = await viewsResponse.json();
-            if (viewsData.data) {
-              viewsData.data.forEach(m => {
-                if (m.name === 'views') views = m.values?.[0]?.value || 0;
-              });
-            }
-          } catch (e) {
-            console.log(`[ANALYTICS] Views also unavailable for ${post.postId}`);
-          }
-        } else if (insightsData.data) {
+        if (insightsData.data) {
           insightsData.data.forEach(m => {
             if (m.name === 'reach') reach = m.values?.[0]?.value || 0;
-            if (m.name === 'plays') plays = m.values?.[0]?.value || 0;
             if (m.name === 'saved') saves = m.values?.[0]?.value || 0;
           });
-
-          // Also try to get views from v22+ API
-          try {
-            const viewsUrl = `https://graph.facebook.com/v22.0/${igMedia.id}/insights?` +
-              `metric=views&access_token=${accessToken}`;
-            const viewsResponse = await fetch(viewsUrl);
-            const viewsData = await viewsResponse.json();
-            if (viewsData.data) {
-              viewsData.data.forEach(m => {
-                if (m.name === 'views') views = m.values?.[0]?.value || 0;
-              });
-            }
-          } catch (e) {
-            // Views not available
-          }
+        } else if (insightsData.error) {
+          console.log(`[ANALYTICS] Reach/Saved unavailable for ${post.postId}: ${insightsData.error.message}`);
         }
 
-        // Use views as impressions (they're similar metrics)
-        impressions = views || plays || 0;
+        // Step 2: Get views from v22 API (replaces impressions and plays)
+        try {
+          const viewsUrl = `https://graph.facebook.com/v22.0/${igMedia.id}/insights?` +
+            `metric=views&access_token=${accessToken}`;
+          const viewsResponse = await fetch(viewsUrl);
+          const viewsData = await viewsResponse.json();
+
+          if (viewsData.data) {
+            viewsData.data.forEach(m => {
+              if (m.name === 'views') views = m.values?.[0]?.value || 0;
+            });
+          } else if (viewsData.error) {
+            console.log(`[ANALYTICS] Views unavailable for ${post.postId}: ${viewsData.error.message}`);
+          }
+        } catch (e) {
+          console.log(`[ANALYTICS] Views fetch error for ${post.postId}: ${e.message}`);
+        }
+
+        // Use views as impressions (they're the same metric now)
+        impressions = views;
+        plays = views; // For backward compatibility with videos
 
         post.engagement = {
           likes,
@@ -450,7 +471,7 @@ class AnalyticsService {
         await post.save();
         updated.push(post.postId);
 
-        console.log(`[ANALYTICS] Updated ${post.postId}: ${likes} likes, ${comments} comments`);
+        console.log(`[ANALYTICS] Updated ${post.postId}: ${likes} likes, ${comments} comments, ${views} views`);
       } catch (error) {
         console.error(`[ANALYTICS] Failed to refresh ${post.postId}:`, error.message);
         errors.push({ postId: post.postId, error: error.message });
