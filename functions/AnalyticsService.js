@@ -372,17 +372,22 @@ class AnalyticsService {
         let impressions = 0;
         let saves = 0;
         let plays = 0;
+        let views = 0;
 
         // Try to get insights from Instagram API
-        // For images: reach, impressions, saved work
-        // For reels/videos: plays, reach, impressions, saved
+        // NOTE: As of v22.0+, 'impressions' is deprecated. Use 'views' instead.
+        // For images: reach, saved, views (v22+)
+        // For reels/videos: plays, reach, saved, views (v22+)
         const mediaType = igMedia.media_type;
-        let metrics = 'reach,impressions,saved';
-        if (mediaType === 'VIDEO' || mediaType === 'CAROUSEL') {
-          metrics = 'plays,reach,impressions,saved';
+
+        // Use v21 API which still supports some metrics
+        // v22+ removed impressions, use 'views' instead
+        let metrics = 'reach,saved';
+        if (mediaType === 'VIDEO' || mediaType === 'REELS') {
+          metrics = 'plays,reach,saved';
         }
 
-        const insightsUrl = `https://graph.facebook.com/v20.0/${igMedia.id}/insights?` +
+        const insightsUrl = `https://graph.facebook.com/v21.0/${igMedia.id}/insights?` +
           `metric=${metrics}&access_token=${accessToken}`;
 
         const insightsResponse = await fetch(insightsUrl);
@@ -391,20 +396,53 @@ class AnalyticsService {
         if (insightsData.error) {
           // Insights may not be available for very recent posts (< 24 hours)
           console.log(`[ANALYTICS] Insights unavailable for ${post.postId}: ${insightsData.error.message}`);
+
+          // Try to get views using the new v22+ endpoint
+          try {
+            const viewsUrl = `https://graph.facebook.com/v22.0/${igMedia.id}/insights?` +
+              `metric=views&access_token=${accessToken}`;
+            const viewsResponse = await fetch(viewsUrl);
+            const viewsData = await viewsResponse.json();
+            if (viewsData.data) {
+              viewsData.data.forEach(m => {
+                if (m.name === 'views') views = m.values?.[0]?.value || 0;
+              });
+            }
+          } catch (e) {
+            console.log(`[ANALYTICS] Views also unavailable for ${post.postId}`);
+          }
         } else if (insightsData.data) {
           insightsData.data.forEach(m => {
             if (m.name === 'reach') reach = m.values?.[0]?.value || 0;
-            if (m.name === 'impressions') impressions = m.values?.[0]?.value || 0;
             if (m.name === 'plays') plays = m.values?.[0]?.value || 0;
             if (m.name === 'saved') saves = m.values?.[0]?.value || 0;
           });
+
+          // Also try to get views from v22+ API
+          try {
+            const viewsUrl = `https://graph.facebook.com/v22.0/${igMedia.id}/insights?` +
+              `metric=views&access_token=${accessToken}`;
+            const viewsResponse = await fetch(viewsUrl);
+            const viewsData = await viewsResponse.json();
+            if (viewsData.data) {
+              viewsData.data.forEach(m => {
+                if (m.name === 'views') views = m.values?.[0]?.value || 0;
+              });
+            }
+          } catch (e) {
+            // Views not available
+          }
         }
+
+        // Use views as impressions (they're similar metrics)
+        impressions = views || plays || 0;
 
         post.engagement = {
           likes,
           comments,
           reach,
           impressions,
+          views,
           plays,
           saves,
           lastUpdated: new Date(),
