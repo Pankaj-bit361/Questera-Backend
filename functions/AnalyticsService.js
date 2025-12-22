@@ -33,6 +33,7 @@ class AnalyticsService {
       return sum + (eng.likes || 0) + (eng.comments || 0) + (eng.shares || 0) + (eng.saves || 0);
     }, 0);
 
+
     const totalReach = posts.reduce((sum, p) => sum + (p.engagement?.reach || 0), 0);
     const totalImpressions = posts.reduce((sum, p) => sum + (p.engagement?.impressions || 0), 0);
 
@@ -362,21 +363,26 @@ class AnalyticsService {
           post.platformPostUrl = igMedia.permalink;
         }
 
+        console.log(`[ANALYTICS] Updating engagement for ${post.postId}...`);
+        console.log(`[ANALYTICS] Likes: ${JSON.stringify(igMedia, null, 2)})` );
+
         let likes = igMedia.like_count || 0;
         let comments = igMedia.comments_count || 0;
         let reach = 0;
         let impressions = 0;
         let saves = 0;
+        let plays = 0;
 
-        // Try to get insights - use v19 for impressions support or v20 with reach,saved only
-        // For images: reach, saved work. For reels/videos: plays, reach, saved
+        // Try to get insights from Instagram API
+        // For images: reach, impressions, saved work
+        // For reels/videos: plays, reach, impressions, saved
         const mediaType = igMedia.media_type;
-        let metrics = 'reach,saved';
-        if (mediaType === 'VIDEO') {
-          metrics = 'plays,reach,saved';
+        let metrics = 'reach,impressions,saved';
+        if (mediaType === 'VIDEO' || mediaType === 'CAROUSEL') {
+          metrics = 'plays,reach,impressions,saved';
         }
 
-        const insightsUrl = `https://graph.facebook.com/v19.0/${igMedia.id}/insights?` +
+        const insightsUrl = `https://graph.facebook.com/v20.0/${igMedia.id}/insights?` +
           `metric=${metrics}&access_token=${accessToken}`;
 
         const insightsResponse = await fetch(insightsUrl);
@@ -384,11 +390,12 @@ class AnalyticsService {
 
         if (insightsData.error) {
           // Insights may not be available for very recent posts (< 24 hours)
-          console.log(`[ANALYTICS] Insights unavailable for ${post.postId}`);
+          console.log(`[ANALYTICS] Insights unavailable for ${post.postId}: ${insightsData.error.message}`);
         } else if (insightsData.data) {
           insightsData.data.forEach(m => {
             if (m.name === 'reach') reach = m.values?.[0]?.value || 0;
-            if (m.name === 'plays') impressions = m.values?.[0]?.value || 0; // Use plays as impressions for videos
+            if (m.name === 'impressions') impressions = m.values?.[0]?.value || 0;
+            if (m.name === 'plays') plays = m.values?.[0]?.value || 0;
             if (m.name === 'saved') saves = m.values?.[0]?.value || 0;
           });
         }
@@ -398,6 +405,7 @@ class AnalyticsService {
           comments,
           reach,
           impressions,
+          plays,
           saves,
           lastUpdated: new Date(),
         };

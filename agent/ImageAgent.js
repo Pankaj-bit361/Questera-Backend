@@ -206,6 +206,7 @@ class ImageAgent {
          }
       });
    }
+   
 
    async getRecentHistory(chatId, limit = 15) {
       if (!chatId) return [];
@@ -234,6 +235,9 @@ class ImageAgent {
       try {
          // Try to find autopilot memory for any chat (brand is user-level)
          const memory = await AutopilotMemory.findOne({ userId }).sort({ updatedAt: -1 }).lean();
+
+         console.log('.Brand profile loaded:', JSON.stringify(memory, null, 2));
+
          if (memory?.brand) {
             return memory.brand;
          }
