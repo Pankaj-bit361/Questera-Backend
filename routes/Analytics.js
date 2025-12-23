@@ -488,4 +488,339 @@ analyticsRouter.post('/fix-media-ids/:userId', async (req, res) => {
   }
 });
 
+/**
+ * GET /analytics/comments/:userId
+ * Fetch all recent comments across all posts for an account
+ */
+analyticsRouter.get('/comments/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { account, limit = 50 } = req.query;
+
+    // Find account credentials
+    let accessToken = null;
+    let igBusinessId = account || null;
+    let accountUsername = null;
+
+    const instagramDocs = await Instagram.find({ userId, isConnected: true });
+    for (const doc of instagramDocs) {
+      if (doc.accounts && doc.accounts.length > 0) {
+        for (const acc of doc.accounts) {
+          if (acc.isConnected !== false && acc.accessToken) {
+            if (account && acc.instagramBusinessAccountId !== account) continue;
+            accessToken = acc.accessToken;
+            igBusinessId = acc.instagramBusinessAccountId;
+            accountUsername = acc.instagramUsername;
+            break;
+          }
+        }
+      }
+      if (!accessToken && doc.accessToken) {
+        if (!account || doc.instagramBusinessAccountId === account) {
+          accessToken = doc.accessToken;
+          igBusinessId = doc.instagramBusinessAccountId;
+          accountUsername = doc.instagramUsername;
+        }
+      }
+      if (accessToken) break;
+    }
+
+    if (!accessToken) {
+      const socialAccounts = await SocialAccount.find({ userId, platform: 'instagram', isActive: true });
+      for (const sa of socialAccounts) {
+        const token = sa.facebookPageAccessToken || sa.accessToken;
+        if (token && sa.instagramBusinessAccountId) {
+          if (!account || sa.instagramBusinessAccountId === account) {
+            accessToken = token;
+            igBusinessId = sa.instagramBusinessAccountId;
+            accountUsername = sa.username || sa.platformUsername;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({ error: 'No Instagram account connected' });
+    }
+
+    // Fetch recent media (last 25 posts)
+    const mediaUrl = `https://graph.facebook.com/v21.0/${igBusinessId}/media?` +
+      `fields=id,caption,permalink,timestamp,media_type,thumbnail_url,media_url,like_count,comments_count&` +
+      `limit=25&access_token=${accessToken}`;
+
+    const mediaResponse = await fetch(mediaUrl);
+    const mediaData = await mediaResponse.json();
+
+    if (mediaData.error) {
+      return res.status(400).json({ error: mediaData.error.message });
+    }
+
+    const allComments = [];
+
+    // Fetch comments for each post
+    for (const post of (mediaData.data || [])) {
+      if (post.comments_count > 0) {
+        const commentsUrl = `https://graph.facebook.com/v21.0/${post.id}/comments?` +
+          `fields=id,text,username,timestamp,like_count,replies{id,text,username,timestamp,like_count}&` +
+          `limit=50&access_token=${accessToken}`;
+
+        const commentsResponse = await fetch(commentsUrl);
+        const commentsData = await commentsResponse.json();
+
+        if (commentsData.data) {
+          for (const comment of commentsData.data) {
+            allComments.push({
+              id: comment.id,
+              text: comment.text,
+              username: comment.username,
+              timestamp: comment.timestamp,
+              likeCount: comment.like_count || 0,
+              postId: post.id,
+              postCaption: post.caption?.substring(0, 100) || '',
+              postPermalink: post.permalink,
+              postThumbnail: post.thumbnail_url || post.media_url,
+              replies: comment.replies?.data?.map(r => ({
+                id: r.id,
+                text: r.text,
+                username: r.username,
+                timestamp: r.timestamp,
+                likeCount: r.like_count || 0,
+              })) || [],
+            });
+          }
+        }
+      }
+    }
+
+    // Sort by timestamp (newest first)
+    allComments.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    return res.status(200).json({
+      success: true,
+      account: accountUsername,
+      totalComments: allComments.length,
+      comments: allComments.slice(0, parseInt(limit)),
+    });
+  } catch (error) {
+    console.error('[ANALYTICS] Comments Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * POST /analytics/comments/:userId/reply
+ * Reply to a comment
+ */
+analyticsRouter.post('/comments/:userId/reply', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { commentId, message, account } = req.body;
+
+    if (!commentId || !message) {
+      return res.status(400).json({ error: 'commentId and message are required' });
+    }
+
+    // Find account credentials
+    let accessToken = null;
+
+    const instagramDocs = await Instagram.find({ userId, isConnected: true });
+    for (const doc of instagramDocs) {
+      if (doc.accounts && doc.accounts.length > 0) {
+        for (const acc of doc.accounts) {
+          if (acc.isConnected !== false && acc.accessToken) {
+            if (account && acc.instagramBusinessAccountId !== account) continue;
+            accessToken = acc.accessToken;
+            break;
+          }
+        }
+      }
+      if (!accessToken && doc.accessToken) {
+        accessToken = doc.accessToken;
+      }
+      if (accessToken) break;
+    }
+
+    if (!accessToken) {
+      const socialAccounts = await SocialAccount.find({ userId, platform: 'instagram', isActive: true });
+      for (const sa of socialAccounts) {
+        const token = sa.facebookPageAccessToken || sa.accessToken;
+        if (token) {
+          accessToken = token;
+          break;
+        }
+      }
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({ error: 'No Instagram account connected' });
+    }
+
+    // Post reply
+    const replyUrl = `https://graph.facebook.com/v21.0/${commentId}/replies`;
+    const replyResponse = await fetch(replyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: message,
+        access_token: accessToken,
+      }),
+    });
+
+    const replyData = await replyResponse.json();
+
+    if (replyData.error) {
+      return res.status(400).json({ error: replyData.error.message });
+    }
+
+    return res.status(200).json({
+      success: true,
+      replyId: replyData.id,
+      message: 'Reply posted successfully',
+    });
+  } catch (error) {
+    console.error('[ANALYTICS] Reply Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * DELETE /analytics/comments/:userId/:commentId
+ * Delete a comment (only works for comments made by the app or on your own posts)
+ */
+analyticsRouter.delete('/comments/:userId/:commentId', async (req, res) => {
+  try {
+    const { userId, commentId } = req.params;
+    const { account } = req.query;
+
+    // Find account credentials
+    let accessToken = null;
+
+    const instagramDocs = await Instagram.find({ userId, isConnected: true });
+    for (const doc of instagramDocs) {
+      if (doc.accounts && doc.accounts.length > 0) {
+        for (const acc of doc.accounts) {
+          if (acc.isConnected !== false && acc.accessToken) {
+            if (account && acc.instagramBusinessAccountId !== account) continue;
+            accessToken = acc.accessToken;
+            break;
+          }
+        }
+      }
+      if (!accessToken && doc.accessToken) {
+        accessToken = doc.accessToken;
+      }
+      if (accessToken) break;
+    }
+
+    if (!accessToken) {
+      const socialAccounts = await SocialAccount.find({ userId, platform: 'instagram', isActive: true });
+      for (const sa of socialAccounts) {
+        const token = sa.facebookPageAccessToken || sa.accessToken;
+        if (token) {
+          accessToken = token;
+          break;
+        }
+      }
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({ error: 'No Instagram account connected' });
+    }
+
+    // Delete comment
+    const deleteUrl = `https://graph.facebook.com/v21.0/${commentId}?access_token=${accessToken}`;
+    const deleteResponse = await fetch(deleteUrl, { method: 'DELETE' });
+    const deleteData = await deleteResponse.json();
+
+    if (deleteData.error) {
+      return res.status(400).json({ error: deleteData.error.message });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Comment deleted successfully',
+    });
+  } catch (error) {
+    console.error('[ANALYTICS] Delete Comment Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * PUT /analytics/comments/:userId/:commentId
+ * Hide or unhide a comment (Instagram API only supports hide, not edit text)
+ */
+analyticsRouter.put('/comments/:userId/:commentId', async (req, res) => {
+  try {
+    const { userId, commentId } = req.params;
+    const { hide, account } = req.body;
+
+    if (typeof hide !== 'boolean') {
+      return res.status(400).json({ error: 'hide parameter (true/false) is required' });
+    }
+
+    // Find account credentials
+    let accessToken = null;
+
+    const instagramDocs = await Instagram.find({ userId, isConnected: true });
+    for (const doc of instagramDocs) {
+      if (doc.accounts && doc.accounts.length > 0) {
+        for (const acc of doc.accounts) {
+          if (acc.isConnected !== false && acc.accessToken) {
+            if (account && acc.instagramBusinessAccountId !== account) continue;
+            accessToken = acc.accessToken;
+            break;
+          }
+        }
+      }
+      if (!accessToken && doc.accessToken) {
+        accessToken = doc.accessToken;
+      }
+      if (accessToken) break;
+    }
+
+    if (!accessToken) {
+      const socialAccounts = await SocialAccount.find({ userId, platform: 'instagram', isActive: true });
+      for (const sa of socialAccounts) {
+        const token = sa.facebookPageAccessToken || sa.accessToken;
+        if (token) {
+          accessToken = token;
+          break;
+        }
+      }
+    }
+
+    if (!accessToken) {
+      return res.status(400).json({ error: 'No Instagram account connected' });
+    }
+
+    // Hide/unhide comment using Instagram Graph API
+    const updateUrl = `https://graph.facebook.com/v21.0/${commentId}`;
+    const updateResponse = await fetch(updateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        hide: hide,
+        access_token: accessToken,
+      }),
+    });
+
+    const updateData = await updateResponse.json();
+
+    if (updateData.error) {
+      return res.status(400).json({ error: updateData.error.message });
+    }
+
+    return res.status(200).json({
+      success: true,
+      hidden: hide,
+      message: hide ? 'Comment hidden successfully' : 'Comment unhidden successfully',
+    });
+  } catch (error) {
+    console.error('[ANALYTICS] Hide Comment Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = analyticsRouter;
