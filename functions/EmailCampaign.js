@@ -415,8 +415,8 @@ class EmailCampaignController {
                     job.errors = errors;
                 }
 
-                // Rate limit: ~50 emails/second (20ms delay)
-                await new Promise(r => setTimeout(r, 20));
+                // Rate limit: 10 emails/second (100ms delay) - SES allows max 14/sec
+                await new Promise(r => setTimeout(r, 100));
             }
         }
     }
