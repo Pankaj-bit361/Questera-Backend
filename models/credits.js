@@ -22,10 +22,10 @@ const PLAN_CONFIG = {
     razorpayPlanId: 'plan_RWMcpE4Eq1vFo7',
   },
   business: {
-    name: 'Velos Business',
+    name: 'Velos Business Plus',
     credits: 1500,
-    price: 4500, // ₹4,500/month
-    razorpayPlanId: 'plan_RWN709UXPBQVrW',
+    price: 10000, // ₹10,000/month
+    razorpayPlanId: 'plan_Rvct2jukhNC9ek',
   },
 };
 

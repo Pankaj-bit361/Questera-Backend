@@ -4,10 +4,10 @@ const Credits = require('./models/credits');
 
 const PLAN_CONFIG = {
   business: {
-    name: 'Velos Business',
+    name: 'Velos Business Plus',
     credits: 1500,
-    price: 4500,
-    razorpayPlanId: 'plan_RWN709UXPBQVrW',
+    price: 10000,
+    razorpayPlanId: 'plan_Rvct2jukhNC9ek',
   },
 };
 
@@ -15,7 +15,7 @@ async function upgradeUser() {
   try {
     // Load env from parent directory
     require('dotenv').config({ path: './.env' });
-    
+
     await mongoose.connect(process.env.MONGO_URL);
     console.log('✅ Connected to MongoDB');
 
@@ -70,7 +70,7 @@ async function upgradeUser() {
     console.log('📊 Credits:', credits.balance);
     console.log('📅 Plan:', credits.planName);
     console.log('🔄 Status:', credits.subscriptionStatus);
-    
+
     process.exit(0);
   } catch (error) {
     console.error('❌ Error:', error.message);
