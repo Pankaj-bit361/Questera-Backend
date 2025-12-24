@@ -597,6 +597,72 @@ class EmailCampaignController {
             return { success: false, error: error.message };
         }
     }
+
+    // GET /preview/:email - Preview the exact email that was/would be sent to a user
+    async previewEmail(req) {
+        const { email } = req.params;
+
+        // Try to find the lead
+        let lead = await EmailLead.findOne({ email }).lean();
+
+        if (!lead) {
+            // If no lead found, create a sample preview
+            lead = {
+                email: email || 'sample@example.com',
+                name: 'Sample User',
+                username: 'sampleuser',
+                category: 'Creator',
+                leadId: 'preview-sample',
+                _id: 'preview-sample'
+            };
+        }
+
+        const name = lead.name || lead.username || 'there';
+        const category = lead.category || 'creator';
+        const subject = `${name}, create stunning AI content in seconds ✨`;
+        const htmlBody = this._getEmailTemplate(lead, name, category);
+
+        return {
+            status: 200,
+            lead: {
+                email: lead.email,
+                name: lead.name,
+                username: lead.username,
+                category: lead.category,
+                status: lead.status,
+                sentAt: lead.sentAt,
+            },
+            subject,
+            html: htmlBody
+        };
+    }
+
+    // GET /preview-list - Get list of recent sent emails with preview capability
+    async getPreviewList(req) {
+        const limit = parseInt(req.query.limit) || 20;
+
+        const emails = await EmailLead.find({ status: { $ne: 'pending' } })
+            .sort({ sentAt: -1 })
+            .limit(limit)
+            .lean();
+
+        return {
+            status: 200,
+            json: {
+                success: true,
+                count: emails.length,
+                emails: emails.map(e => ({
+                    email: e.email,
+                    name: e.name,
+                    username: e.username,
+                    category: e.category,
+                    status: e.status,
+                    sentAt: e.sentAt,
+                    previewUrl: `/api/email-campaign/preview/${encodeURIComponent(e.email)}`
+                }))
+            }
+        };
+    }
 }
 
 module.exports = EmailCampaignController;

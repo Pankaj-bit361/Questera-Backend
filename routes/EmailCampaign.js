@@ -268,5 +268,40 @@ emailCampaignRouter.post('/send-test', async (req, res) => {
     }
 });
 
+// GET /api/email-campaign/preview-list - Get list of sent emails with preview URLs
+emailCampaignRouter.get('/preview-list', async (req, res) => {
+    try {
+        const { status, json } = await controller.getPreviewList(req);
+        return res.status(status).json(json);
+    } catch (error) {
+        console.error('[EMAIL-CAMPAIGN] Preview list error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// GET /api/email-campaign/preview/:email - Preview exact email sent to a user (renders HTML)
+emailCampaignRouter.get('/preview/:email', async (req, res) => {
+    try {
+        const result = await controller.previewEmail(req);
+
+        // Check if user wants JSON or HTML
+        if (req.query.format === 'json') {
+            return res.status(result.status).json({
+                success: true,
+                lead: result.lead,
+                subject: result.subject,
+                html: result.html
+            });
+        }
+
+        // Return rendered HTML for browser viewing
+        res.set('Content-Type', 'text/html');
+        return res.send(result.html);
+    } catch (error) {
+        console.error('[EMAIL-CAMPAIGN] Preview error:', error);
+        return res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 module.exports = emailCampaignRouter;
 
