@@ -188,13 +188,17 @@ Now call schedule_post with this EXACT imageUrl. Do NOT use lastImageUrl or any 
          { role: 'system', content: this.buildSystemPrompt() }
       ];
 
+      // Collect all image URLs from history for context
+      const historyImageUrls = [];
+
       if (context.history && Array.isArray(context.history)) {
          for (const msg of context.history) {
             let content = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
 
-            // For assistant messages with images, show a simplified summary (not as tool call to avoid confusion)
+            // For assistant messages with images, INCLUDE the actual URL so LLM knows it
             if (msg.imageUrl && msg.role === 'assistant') {
-               content = `[Image was generated successfully]`;
+               historyImageUrls.push(msg.imageUrl);
+               content = `[Image generated: ${msg.imageUrl}]`;
             }
 
             messages.push({
@@ -202,6 +206,16 @@ Now call schedule_post with this EXACT imageUrl. Do NOT use lastImageUrl or any 
                content
             });
          }
+      }
+
+      // Add a context message with recent image URLs if any exist
+      if (historyImageUrls.length > 0) {
+         const recentImages = historyImageUrls.slice(-10); // Last 10 images
+         const imageContext = `[RECENT_IMAGES_IN_CONVERSATION: ${JSON.stringify(recentImages)}]`;
+         messages.push({
+            role: 'system',
+            content: imageContext
+         });
       }
 
       let userContent = input.message || input;

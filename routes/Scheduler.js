@@ -461,5 +461,81 @@ schedulerRouter.post('/upload-media', async (req, res) => {
   }
 });
 
+/**
+ * POST /scheduler/publish-now
+ * Immediately publish a post to Instagram (no scheduling)
+ * This uploads media to S3 and publishes directly in one call
+ */
+schedulerRouter.post('/publish-now', async (req, res) => {
+  try {
+    const {
+      userId,
+      media, // { data: base64, mimeType: 'image/png' }
+      caption,
+      hashtags,
+      postType = 'image', // 'image', 'story'
+      accountId,
+    } = req.body;
+
+    // Validate required fields
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+    if (!media || !media.data) {
+      return res.status(400).json({ error: 'media with data is required' });
+    }
+    if (!accountId) {
+      return res.status(400).json({ error: 'accountId is required' });
+    }
+
+    console.log(`🚀 [PUBLISH-NOW] Starting immediate publish for user ${userId}`);
+
+    // Step 1: Upload media to S3
+    let imageUrl = null;
+    const folder = postType === 'story' ? 'scheduler/stories' : 'scheduler/posts';
+    imageUrl = await uploadToS3(media.data, media.mimeType, folder);
+    console.log(`📤 [PUBLISH-NOW] Media uploaded to S3: ${imageUrl}`);
+
+    // Step 2: Publish directly to Instagram
+    const InstagramController = require('../functions/Instagram');
+    const instagramController = new InstagramController();
+
+    const fullCaption = hashtags ? `${caption}\n\n${hashtags}` : caption;
+
+    let result;
+    if (postType === 'story') {
+      result = await instagramController.publishStory({
+        body: { userId, imageUrl, accountId },
+      });
+    } else {
+      result = await instagramController.publishImage({
+        body: { userId, imageUrl, caption: fullCaption, accountId },
+      });
+    }
+
+    if (result.json.success) {
+      console.log(`✅ [PUBLISH-NOW] Published successfully! Media ID: ${result.json.mediaId}`);
+      return res.status(200).json({
+        success: true,
+        message: 'Post published successfully',
+        mediaId: result.json.mediaId,
+        permalink: result.json.permalink,
+        imageUrl,
+        status: 'published',
+      });
+    } else {
+      console.error(`❌ [PUBLISH-NOW] Publish failed:`, result.json.error);
+      return res.status(400).json({
+        success: false,
+        error: result.json.error || 'Failed to publish to Instagram',
+        details: result.json.details,
+      });
+    }
+  } catch (error) {
+    console.error('[SCHEDULER] Publish Now Error:', error);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = schedulerRouter;
 

@@ -6,7 +6,7 @@ const narrator = new CognitiveNarrator();
 
 /**
  * Autopilot Tool - Enables autopilot mode with brand onboarding
- * 
+ *
  * Flow:
  * 1. User asks to enable autopilot
  * 2. If brand info missing, return questions for agent to ask
@@ -15,28 +15,101 @@ const narrator = new CognitiveNarrator();
  */
 const autopilotTool = {
   name: 'autopilot',
-  description: `Manage autopilot mode for autonomous social media posting. 
-Actions:
-- "check": Check autopilot status and if brand info is complete
-- "enable": Enable autopilot (requires brand info first)
-- "disable": Disable autopilot
-- "save_brand": Save brand information for autopilot context
-- "run_now": Manually trigger autopilot to create today's content`,
+  description: `Manage autopilot mode for fully autonomous social media content creation and posting.
+
+WHAT IS AUTOPILOT?
+Autopilot automatically creates and schedules Instagram content without user intervention.
+It uses brand context to generate on-brand images and captions, then schedules them optimally.
+
+WHEN TO USE:
+- User says "enable autopilot", "turn on autopilot", "auto-post for me"
+- User says "disable autopilot", "turn off autopilot", "stop auto-posting"
+- User wants to check autopilot status
+- User provides brand information for autopilot setup
+- User says "run autopilot now", "create today's content"
+- User asks "is autopilot on?", "what's my autopilot status?"
+
+WHEN NOT TO USE:
+- User wants to manually create ONE image → use generate_image
+- User wants to manually schedule ONE post → use schedule_post
+- User just wants to chat → use reply
+- User hasn't expressed interest in automated posting
+
+ACTIONS AVAILABLE:
+
+1. "check" - Check current autopilot status
+   - Shows if enabled/disabled/paused
+   - Shows if brand info is complete
+   - Returns onboarding questions if brand info missing
+
+2. "enable" - Turn on autopilot
+   - Requires brand info to be complete first
+   - If brand info missing, returns onboarding questions
+   - Once enabled, will auto-create and schedule content
+
+3. "disable" - Turn off autopilot
+   - Stops all automatic content creation
+   - Preserves brand info for future re-enable
+
+4. "save_brand" - Save brand information
+   - Call this with brandInfo object after onboarding
+   - Required before enabling autopilot
+   - Stores: niche, targetAudience, visualStyle, tone, topics
+
+5. "run_now" - Manually trigger autopilot
+   - Creates content immediately (doesn't wait for schedule)
+   - Useful for testing or one-time content push
+   - Requires autopilot to be set up (brand info complete)
+
+ONBOARDING FLOW:
+1. User: "Enable autopilot"
+2. You: Call check/enable → get onboarding questions
+3. You: Ask user the questions
+4. User: Provides brand info
+5. You: Call save_brand with brandInfo object
+6. You: Call enable to activate autopilot
+
+BRAND INFO OBJECT:
+{
+  niche: "fitness, wellness",
+  targetAudience: "Women 25-40 interested in home workouts",
+  visualStyle: "bright, energetic, clean backgrounds",
+  tone: "motivational, friendly, encouraging",
+  topics: ["workout tips", "healthy recipes", "motivation"],
+  referenceImageUrl: "optional URL to user's photo"
+}
+
+EXAMPLES:
+- "Turn on autopilot" → check status, onboard if needed, then enable
+- "What's my autopilot status?" → action: "check"
+- "Stop autopilot" → action: "disable"
+- "Create today's posts now" → action: "run_now"
+- After collecting brand info → action: "save_brand" with brandInfo
+
+IMPORTANT:
+- chatId is required for all actions (identifies which account/chat)
+- Brand info must be complete before enabling
+- Autopilot respects posting limits (max posts per day)
+- User can always disable and return to manual mode`,
+
   parameters: {
     action: {
       type: 'string',
       required: true,
-      description: 'Action: "check", "enable", "disable", "save_brand", or "run_now"'
+      description: 'Action to perform: "check", "enable", "disable", "save_brand", or "run_now"',
+      example: 'enable'
     },
     chatId: {
       type: 'string',
       required: true,
-      description: 'The chat/account ID for this autopilot instance'
+      description: 'The chat/conversation ID. Identifies which account autopilot is for.',
+      example: 'chat_abc123'
     },
     brandInfo: {
       type: 'object',
       required: false,
-      description: 'Brand information object with: niche, targetAudience, visualStyle, tone, topics, referenceImageUrl'
+      description: 'Brand context for autopilot. Required for save_brand action. Include: niche, targetAudience, visualStyle, tone, topics, referenceImageUrl (optional)',
+      example: { niche: 'fitness', targetAudience: 'Women 25-40', visualStyle: 'bright and energetic', tone: 'motivational', topics: ['workouts', 'nutrition', 'motivation'] }
     }
   },
 

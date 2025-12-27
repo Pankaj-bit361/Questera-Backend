@@ -8,11 +8,13 @@ const extractWebsiteTool = require('./extractWebsite');
 const deepResearchTool = require('./deepResearch');
 const autopilotTool = require('./autopilot');
 const generateVideoTool = require('./generateVideo');
+const batchEditTool = require('./batchEdit');
 
 
 const allTools = [
    generateImageTool,
    editImageTool,
+   batchEditTool,
    schedulePostTool,
    replyTool,
    getAccountsTool,
@@ -27,6 +29,7 @@ const allTools = [
 module.exports = {
    generateImageTool,
    editImageTool,
+   batchEditTool,
    schedulePostTool,
    replyTool,
    getAccountsTool,

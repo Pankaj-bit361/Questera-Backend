@@ -375,8 +375,27 @@ class SchedulerController {
           console.error(`❌ [SCHEDULER] Failed to publish post ${post.postId}:`, error);
           post.retryCount += 1;
           post.publishError = error.message;
-          if (post.retryCount >= 3) {
+
+          // Check for non-retryable errors (rate limit, action block, etc.)
+          const errorMsg = error.message?.toLowerCase() || '';
+          const isNonRetryable =
+            errorMsg.includes('request limit reached') ||
+            errorMsg.includes('action is blocked') ||
+            errorMsg.includes('rate limit') ||
+            errorMsg.includes('spam') ||
+            errorMsg.includes('temporarily blocked');
+
+          if (isNonRetryable) {
+            console.log(`🚫 [SCHEDULER] Non-retryable error detected, marking post as failed immediately`);
             post.status = 'failed';
+            post.publishError = `${error.message} (No retry - action blocked)`;
+          } else if (post.retryCount >= 3) {
+            post.status = 'failed';
+          }
+
+          console.log(`📊 [SCHEDULER] Post ${post.postId} retry count: ${post.retryCount}/3, status: ${post.status}`);
+
+          if (post.status === 'failed') {
             // Send failure email notification
             this.emailService.sendPostFailedEmail(post.userId, post, error.message).catch(err => {
               console.error('❌ [SCHEDULER] Failed to send failure email:', err);

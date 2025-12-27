@@ -8,27 +8,69 @@ const narrator = new CognitiveNarrator();
 
 const generateImageTool = {
    name: 'generate_image',
-   description: 'Generate new AI image(s) from a text prompt. Use this when user wants to create a new image.',
+   description: `Generate new AI image(s) from a text prompt.
+
+WHEN TO USE:
+- User wants to create a NEW image from scratch
+- User says "create", "generate", "make", "design" an image
+- User describes a visual scene, person, product, or concept
+- User wants marketing visuals, social media graphics, or creative content
+
+WHEN NOT TO USE:
+- User wants to EDIT an existing image → use edit_image instead
+- User wants multiple VARIATIONS of same subject → use create_variations instead
+- User just wants to chat or ask questions → use reply instead
+- User wants to schedule/post → use schedule_post instead
+
+PROMPTING TIPS:
+- Include subject, environment, lighting, mood, and style for best results
+- Mention aspect ratio in prompt if important (e.g., "16:9 landscape shot")
+- Add quality keywords: "professional photography", "8k quality", "detailed"
+- For people: describe pose, expression, clothing, background
+- For products: describe angle, lighting setup, context
+
+REFERENCE IMAGES:
+- If user uploaded reference images, they will be used automatically for face/style consistency
+- Great for "create an image of ME doing X" requests
+- Reference images help maintain same person/character across generations
+
+EXAMPLES:
+- "A cyberpunk cityscape at night with neon signs" → generates sci-fi urban scene
+- "Professional headshot of a woman, studio lighting" → generates portrait
+- "Product shot of sneakers on marble, dramatic lighting" → generates product photo
+- "Create a post about my coffee shop" + reference image → branded content with consistent style
+
+IMPORTANT:
+- Default aspect ratio is 1:1 (square) if not specified
+- For Instagram feed: use 1:1 or 4:5
+- For Instagram stories/reels: use 9:16
+- For YouTube thumbnails: use 16:9
+- Count is 1-4 images per generation`,
+
    parameters: {
       prompt: {
          type: 'string',
          required: true,
-         description: 'Detailed prompt describing the image to generate'
+         description: 'Detailed prompt describing the image to generate. Include subject, style, lighting, mood.',
+         example: 'A professional woman in business attire, modern office background, soft natural lighting, confident pose, photorealistic style'
       },
       count: {
          type: 'number',
          required: false,
-         description: 'Number of images to generate (1-4). Default is 1'
+         description: 'Number of images to generate (1-4). Default is 1. Use higher count when user wants options.',
+         example: 2
       },
       style: {
          type: 'string',
          required: false,
-         description: 'Style like cinematic, anime, photorealistic, etc'
+         description: 'Visual style: cinematic, anime, photorealistic, illustration, watercolor, oil-painting, 3d-render, minimalist, vintage, neon',
+         example: 'cinematic'
       },
       aspectRatio: {
          type: 'string',
          required: false,
-         description: 'Aspect ratio like 1:1, 16:9, 9:16, 4:3, 3:4'
+         description: 'Aspect ratio. Use 1:1 for Instagram feed, 9:16 for stories/reels, 16:9 for YouTube/banners, 4:5 for portrait posts',
+         example: '9:16'
       }
    },
 

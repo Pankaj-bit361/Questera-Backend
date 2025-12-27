@@ -27,32 +27,113 @@ async function fetchImageAsBase64(imageUrl) {
 
 const createVariationsTool = {
    name: 'create_variations',
-   description: 'Create multiple variations of an image. Use when user wants alternatives, options, or different poses/angles. IMPORTANT: This will use the last generated image as reference to maintain the same person/subject.',
+   description: `Create multiple variations of an image while maintaining the same subject/person/character.
+
+WHEN TO USE:
+- User wants MULTIPLE OPTIONS or ALTERNATIVES of same subject
+- User says "give me variations", "show me options", "different versions"
+- User wants same person in different poses/angles
+- User wants same subject with different styles/lighting
+- User wants same character in different outfits
+- User wants same product in different scenes/backgrounds
+- User says "front view, back view, side view" of same subject
+
+WHEN NOT TO USE:
+- User wants ONE specific new image → use generate_image instead
+- User wants to EDIT an existing image → use edit_image instead
+- User wants completely different subjects → use generate_image multiple times
+- No reference image exists yet → use generate_image first to create base
+
+KEY FEATURE: SUBJECT CONSISTENCY
+- Uses the last generated image as reference automatically
+- Maintains the SAME person/character/subject across all variations
+- Perfect for character consistency, product shots, model poses
+- Critical for "show me from different angles" requests
+
+VARIATION TYPES:
+
+1. "pose" or "angle" - Different angles/poses:
+   - Front view, back view, left profile, right profile
+   - Three-quarter view, full body, close-up portrait
+   - Great for character sheets, model portfolios
+
+2. "style" (default) - Different lighting/mood:
+   - Cinematic, soft natural, vibrant, moody, golden hour
+   - Studio lighting, neon glow, vintage film
+   - Great for finding the right aesthetic
+
+3. "outfit" or "clothing" - Different attire:
+   - Casual, formal, athletic, elegant, vintage
+   - Futuristic, traditional, minimalist
+   - Great for fashion content, character design
+
+4. "scene" or "background" - Different environments:
+   - City street, forest, sci-fi, studio, beach
+   - Rooftop, fantasy world, office, café
+   - Great for placing same subject in different contexts
+
+CUSTOM VARIANTS:
+- Provide specific list of variations you want
+- Overrides variationType when provided
+- Example: ["holding coffee", "on laptop", "in meeting", "presenting"]
+
+EXAMPLES:
+- "Show me different poses" → pose variations of last image
+- "Give me 4 style options" → style variations (lighting/mood)
+- "Same person, different outfits" → outfit variations
+- "Put them in different locations" → scene variations
+- "Front, back, left, right views" → customVariants with specific angles
+
+IMPORTANT:
+- Requires a previous image to work (uses as reference)
+- Generates 2-10 variations (default 4)
+- More variations = more generation time
+- All variations maintain subject consistency`,
+
    parameters: {
       basePrompt: {
          type: 'string',
          required: true,
-         description: 'The base prompt describing the subject/person to create variations from'
+         description: 'Base description of the subject. The variation modifiers will be appended to this.',
+         example: 'A professional woman in her 30s with brown hair, confident expression'
       },
       count: {
          type: 'number',
          required: false,
-         description: 'Number of variations (2-10). Default is 4'
+         description: 'Number of variations to generate (2-10). More = longer wait. Default is 4.',
+         example: 4
       },
       variationType: {
          type: 'string',
          required: false,
-         description: 'Type of variation: "pose" (for different angles/poses like front, back, left, right), "style" (for lighting/mood), "outfit" (for different clothing), "scene" (for different backgrounds). Default is "style"'
+         description: 'Type: "pose" (angles), "style" (lighting/mood), "outfit" (clothing), "scene" (backgrounds). Default: "style"',
+         example: 'pose'
       },
       customVariants: {
          type: 'array',
          required: false,
-         description: 'Custom list of specific variations to generate (e.g., ["front view", "back view", "left profile", "right profile", "full body"]). If provided, overrides variationType.'
+         description: 'Custom variation list. Overrides variationType. Each item is appended to basePrompt.',
+         example: ['front view facing camera', 'back view from behind', 'left side profile', 'right side profile']
+      },
+      aspectRatio: {
+         type: 'string',
+         required: false,
+         description: 'Aspect ratio for all variations. Use "4:5" for Instagram feed/carousel (RECOMMENDED), "1:1" for square, "9:16" for stories/reels. Default: original ratio.',
+         example: '4:5'
+      },
+      forInstagram: {
+         type: 'boolean',
+         required: false,
+         description: 'If true, automatically uses 4:5 aspect ratio optimized for Instagram feed posts and carousels. Overrides aspectRatio.',
+         example: true
       }
    },
 
    execute: async (params, context) => {
-      const { basePrompt, count = 4, variationType = 'style', customVariants } = params;
+      const { basePrompt, count = 4, variationType = 'style', customVariants, aspectRatio, forInstagram } = params;
+
+      // Determine aspect ratio - forInstagram takes priority
+      const finalAspectRatio = forInstagram ? '4:5' : aspectRatio;
       const { userId, chatId, referenceImages, lastImageUrl } = context;
 
       if (!userId) {
@@ -168,9 +249,25 @@ const createVariationsTool = {
          console.log('🎨 [VARIATIONS] Using variationType:', variationType, '→', variantsToUse.slice(0, 3).join(', '), '...');
       }
 
+      // Log aspect ratio usage
+      if (finalAspectRatio) {
+         console.log('🖼️ [VARIATIONS] Using aspect ratio:', finalAspectRatio, forInstagram ? '(Instagram optimized)' : '');
+      }
+
       for (let i = 0; i < variationCount; i++) {
          const variantModifier = variantsToUse[i % variantsToUse.length];
-         const variantPrompt = `${basePrompt}, ${variantModifier}`;
+
+         // Build prompt with aspect ratio instruction if specified
+         let variantPrompt = `${basePrompt}, ${variantModifier}`;
+         if (finalAspectRatio) {
+            // Add aspect ratio to prompt for better generation
+            const ratioHint = finalAspectRatio === '4:5' ? ', portrait composition optimized for Instagram feed'
+               : finalAspectRatio === '9:16' ? ', vertical composition optimized for Instagram stories/reels'
+               : finalAspectRatio === '1:1' ? ', square composition'
+               : finalAspectRatio === '16:9' ? ', widescreen cinematic composition'
+               : '';
+            variantPrompt += ratioHint;
+         }
 
          const mockReq = {
             body: {
@@ -178,7 +275,8 @@ const createVariationsTool = {
                userId,
                imageChatId: chatId,
                images: imagesToUse,  // Use the reference images!
-               isEdit: false
+               isEdit: false,
+               aspectRatio: finalAspectRatio // Pass aspect ratio to image generator
             }
          };
 
@@ -196,13 +294,18 @@ const createVariationsTool = {
       }
 
       const typeLabel = customVariants ? 'custom' : variationType;
+      const aspectNote = finalAspectRatio ? ` in ${finalAspectRatio} aspect ratio` : '';
       return {
          success: true,
          variations,
          count: variations.length,
          imageChatId: chatId,
          variationType: typeLabel,
-         message: `Created ${variations.length} ${typeLabel} variations using the same reference image`
+         aspectRatio: finalAspectRatio,
+         forInstagram: !!forInstagram,
+         message: `Created ${variations.length} ${typeLabel} variations${aspectNote} using the same reference image`,
+         // Hint for agent to continue with caption/scheduling
+         nextSteps: forInstagram ? ['Generate a viral caption', 'Schedule as carousel post'] : []
       };
    }
 };

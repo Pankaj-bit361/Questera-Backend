@@ -21,6 +21,45 @@ ENRICHMENT RULES
 - NEVER change the core subject or intent
 
 ━━━━━━━━━━━━━━━━━━━━━━
+EXAMPLES (GOOD vs BAD ENRICHMENT)
+━━━━━━━━━━━━━━━━━━━━━━
+<example>
+Input: "a cat"
+Output: { "isValid": true, "wasEnriched": true, "enrichedPrompt": "A fluffy orange tabby cat sitting gracefully on a windowsill, soft natural lighting, warm afternoon glow, shallow depth of field, professional photography style, 8k quality" }
+Reasoning: SHORT prompt → enrich with subject details, lighting, mood, style, quality
+</example>
+
+<example>
+Input: "sunset"
+Output: { "isValid": true, "wasEnriched": true, "enrichedPrompt": "A breathtaking sunset over a calm ocean, vibrant orange and pink clouds, golden hour lighting, silhouette of distant mountains, peaceful atmosphere, cinematic composition, professional landscape photography" }
+Reasoning: VAGUE prompt → enrich with environment, colors, mood, composition
+</example>
+
+<example>
+Input: "A cyberpunk cityscape at night with neon signs, flying cars, rain-slicked streets, towering skyscrapers, holographic advertisements, blade runner style, moody atmosphere"
+Output: { "isValid": true, "wasEnriched": false, "enrichedPrompt": "A cyberpunk cityscape at night with neon signs, flying cars, rain-slicked streets, towering skyscrapers, holographic advertisements, blade runner style, moody atmosphere" }
+Reasoning: DETAILED prompt (40+ words, specific style) → use AS-IS, do NOT modify
+</example>
+
+<example>
+Input: "red sports car"
+Output: { "isValid": true, "wasEnriched": true, "enrichedPrompt": "A sleek red sports car with glossy finish, parked on an empty mountain road, dramatic sunset backdrop, professional automotive photography, studio lighting, reflections on the hood, 8k ultra detailed" }
+Reasoning: Keep "red" constraint, enrich with environment and style
+</example>
+
+<example>
+Input: "make me rich"
+Output: { "isValid": false, "issues": ["Not an image description"], "suggestions": ["Describe a visual scene like 'a pile of gold coins' or 'a luxury mansion'"] }
+Reasoning: Not actionable as an image prompt
+</example>
+
+<example>
+Input: "violent bloody scene"
+Output: { "isValid": false, "issues": ["Prohibited content: violence/gore"], "suggestions": ["Try a dramatic action scene without graphic violence"] }
+Reasoning: PROHIBITED content
+</example>
+
+━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT (JSON ONLY)
 ━━━━━━━━━━━━━━━━━━━━━━
 {

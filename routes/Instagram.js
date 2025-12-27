@@ -253,20 +253,36 @@ instagramRouter.get('/page-content/:userId/:pageId', async (req, res) => {
       return res.status(400).json({ error: pageData.error.message });
     }
 
-    // Fetch Page posts with engagement
-    const postsUrl = `https://graph.facebook.com/v21.0/${pageId}/posts?fields=id,message,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),comments.summary(true),reactions.summary(true)&limit=25&access_token=${pageAccessToken}`;
-    const postsResponse = await fetch(postsUrl);
-    const postsData = await postsResponse.json();
+    // Fetch Page posts with engagement (try /feed first for more complete results, fallback to /posts)
+    // /feed includes posts by the page AND posts by others on the page
+    // /posts only includes posts made by the page itself
+    console.log('[PAGE-CONTENT] Fetching posts for page:', pageId);
+
+    const feedUrl = `https://graph.facebook.com/v21.0/${pageId}/feed?fields=id,message,story,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),comments.summary(true),reactions.summary(true)&limit=25&access_token=${pageAccessToken}`;
+    const feedResponse = await fetch(feedUrl);
+    const feedData = await feedResponse.json();
+
+    console.log('[PAGE-CONTENT] Feed API response:', JSON.stringify(feedData, null, 2));
+
+    // Use feed data (more complete) or fall back to posts endpoint
+    let postsData = feedData;
+    if (feedData.error || !feedData.data || feedData.data.length === 0) {
+      console.log('[PAGE-CONTENT] Feed empty or error, trying /posts endpoint');
+      const postsUrl = `https://graph.facebook.com/v21.0/${pageId}/posts?fields=id,message,story,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),comments.summary(true),reactions.summary(true)&limit=25&access_token=${pageAccessToken}`;
+      const postsResponse = await fetch(postsUrl);
+      postsData = await postsResponse.json();
+      console.log('[PAGE-CONTENT] Posts API response:', JSON.stringify(postsData, null, 2));
+    }
 
     // Fetch Page insights (engagement metrics)
     const insightsUrl = `https://graph.facebook.com/v21.0/${pageId}/insights?metric=page_engaged_users,page_post_engagements,page_impressions,page_fans&period=day&access_token=${pageAccessToken}`;
     const insightsResponse = await fetch(insightsUrl);
     const insightsData = await insightsResponse.json();
 
-    // Format posts
+    // Format posts - use message first, then story as fallback
     const posts = (postsData.data || []).map(post => ({
       id: post.id,
-      message: post.message || '',
+      message: post.message || post.story || '',  // Use story as fallback for posts like "updated profile picture"
       createdTime: post.created_time,
       image: post.full_picture || null,
       mediaType: post.attachments?.data?.[0]?.media_type || 'status',
@@ -275,6 +291,8 @@ instagramRouter.get('/page-content/:userId/:pageId', async (req, res) => {
       shares: post.shares?.count || 0,
       reactions: post.reactions?.summary?.total_count || 0,
     }));
+
+    console.log('[PAGE-CONTENT] Formatted posts count:', posts.length);
 
     // Format insights
     const insights = {};

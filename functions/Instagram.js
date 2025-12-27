@@ -23,6 +23,10 @@ class InstagramController {
         const data = await response.json();
 
         const status = data.status_code;
+        // Log full response on first attempt or if undefined
+        if (i === 0 || status === undefined) {
+          console.log(`📦 [INSTAGRAM] Container ${containerId} full response:`, JSON.stringify(data));
+        }
         console.log(`📦 [INSTAGRAM] Container ${containerId} status: ${status} (attempt ${i + 1}/${maxAttempts})`);
 
         if (status === 'FINISHED') {
@@ -593,6 +597,8 @@ class InstagramController {
       }
 
       console.log('🎠 [INSTAGRAM] Publishing Carousel with', imageUrls.length, 'images...');
+      console.log('🎠 [INSTAGRAM] All image URLs:');
+      imageUrls.forEach((url, i) => console.log(`   ${i + 1}. ${url}`));
 
       const instagram = await Instagram.findOne({ userId });
       if (!instagram) {
@@ -638,11 +644,40 @@ class InstagramController {
       const { instagramBusinessAccountId, accessToken, instagramUsername } = account;
       const baseUrl = `https://graph.facebook.com/${this.apiVersion}`;
 
+      // Step 0: Validate all image URLs are accessible
+      console.log('🔍 [INSTAGRAM] Validating image URLs...');
+      const validImageUrls = [];
+      for (const imageUrl of imageUrls) {
+        try {
+          const checkResponse = await fetch(imageUrl, { method: 'HEAD' });
+          if (checkResponse.ok) {
+            validImageUrls.push(imageUrl);
+            console.log('✅ [INSTAGRAM] Image valid:', imageUrl.slice(-50));
+          } else {
+            console.warn('⚠️ [INSTAGRAM] Image not accessible (skipping):', imageUrl.slice(-50));
+          }
+        } catch (err) {
+          console.warn('⚠️ [INSTAGRAM] Image check failed (skipping):', imageUrl.slice(-50), err.message);
+        }
+      }
+
+      if (validImageUrls.length < 2) {
+        return {
+          status: 400,
+          json: {
+            error: `Only ${validImageUrls.length} valid images found. Instagram carousels require at least 2 images.`,
+            validUrls: validImageUrls,
+            originalCount: imageUrls.length
+          }
+        };
+      }
+      console.log(`🎠 [INSTAGRAM] ${validImageUrls.length}/${imageUrls.length} images are valid`);
+
       // Step 1: Create child containers for each image
       console.log('🎠 [INSTAGRAM] Creating child containers...');
       const childContainerIds = [];
 
-      for (const imageUrl of imageUrls) {
+      for (const imageUrl of validImageUrls) {
         const containerUrl = `${baseUrl}/${instagramBusinessAccountId}/media`;
         const containerParams = new URLSearchParams({
           image_url: imageUrl,
@@ -657,11 +692,23 @@ class InstagramController {
 
         if (containerData.error) {
           console.error('❌ [INSTAGRAM] Child container creation failed:', containerData.error);
-          return { status: 400, json: { error: containerData.error.message, details: containerData.error } };
+          // Continue with other images instead of failing completely
+          console.warn('⚠️ [INSTAGRAM] Skipping this image and continuing...');
+          continue;
         }
 
         childContainerIds.push(containerData.id);
         console.log('📦 [INSTAGRAM] Child container created:', containerData.id);
+      }
+
+      if (childContainerIds.length < 2) {
+        return {
+          status: 400,
+          json: {
+            error: `Only ${childContainerIds.length} child containers created. Instagram carousels require at least 2.`,
+            successfulContainers: childContainerIds.length
+          }
+        };
       }
 
       // Wait for all children to be ready
@@ -671,7 +718,9 @@ class InstagramController {
 
       // Step 2: Create carousel container
       console.log('🎠 [INSTAGRAM] Creating carousel container...');
-      const carouselUrl = `${baseUrl}/${instagramBusinessAccountId}/media`;
+      console.log('🎠 [INSTAGRAM] Child container IDs:', childContainerIds);
+
+      // Instagram API expects parameters as URL query params, NOT form body
       const carouselParams = new URLSearchParams({
         media_type: 'CAROUSEL',
         children: childContainerIds.join(','),
@@ -679,10 +728,17 @@ class InstagramController {
         access_token: accessToken,
       });
 
-      const carouselResponse = await fetch(`${carouselUrl}?${carouselParams}`, {
+      const carouselUrl = `${baseUrl}/${instagramBusinessAccountId}/media?${carouselParams}`;
+
+      console.log('🎠 [INSTAGRAM] Carousel URL (without token):', `${baseUrl}/${instagramBusinessAccountId}/media?media_type=CAROUSEL&children=${childContainerIds.join(',')}`);
+
+      const carouselResponse = await fetch(carouselUrl, {
         method: 'POST',
       });
       const carouselData = await carouselResponse.json();
+
+      console.log('📦 [INSTAGRAM] Carousel API response:', JSON.stringify(carouselData));
+      console.log('📦 [INSTAGRAM] Carousel API response status:', carouselResponse.status);
 
       if (carouselData.error) {
         console.error('❌ [INSTAGRAM] Carousel container creation failed:', carouselData.error);
@@ -690,6 +746,28 @@ class InstagramController {
       }
 
       const carouselContainerId = carouselData.id;
+      console.log('📦 [INSTAGRAM] Carousel container ID:', carouselContainerId, 'type:', typeof carouselContainerId);
+
+      // Check for invalid/zero ID - Instagram sometimes returns "0" when there's an issue
+      // Also check for numeric 0 and string "0"
+      const isInvalidId = !carouselContainerId ||
+                          carouselContainerId === '0' ||
+                          carouselContainerId === 0 ||
+                          String(carouselContainerId) === '0';
+
+      console.log('📦 [INSTAGRAM] Is invalid ID?', isInvalidId);
+
+      if (isInvalidId) {
+        console.error('❌ [INSTAGRAM] Invalid carousel container ID returned:', carouselData);
+        return {
+          status: 400,
+          json: {
+            error: 'Instagram API returned invalid carousel container ID (0). This usually means there was an issue with the request. Check that the access token has proper permissions.',
+            details: carouselData,
+            childContainerIds: childContainerIds
+          }
+        };
+      }
       console.log('📦 [INSTAGRAM] Carousel container created:', carouselContainerId);
 
       // Wait for carousel to be ready

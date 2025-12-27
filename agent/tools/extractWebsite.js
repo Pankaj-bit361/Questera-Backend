@@ -6,12 +6,62 @@ const narrator = new CognitiveNarrator();
 
 const extractWebsiteTool = {
    name: 'extract_website',
-   description: 'Extract structured content from a website URL. Use when user wants to create content based on their website or brand. Fast and deterministic.',
+   description: `Extract structured content from a website URL for brand-aware content creation.
+
+WHEN TO USE:
+- User mentions their website or brand URL
+- User says "check out my website", "based on my site", "from my brand"
+- User wants content that matches their brand voice/style
+- User provides a URL and wants related content
+- Before creating branded marketing content
+- User says "create content for my business" and provides URL
+
+WHEN NOT TO USE:
+- User wants general research on a topic → use deep_research instead
+- User just wants to chat → use reply instead
+- User already described their brand in detail (no URL needed)
+- URL is for reference/inspiration only, not their own brand
+
+WHAT IT EXTRACTS:
+- Brand name and tagline
+- Meta description and value proposition
+- Headlines (H1, H2) and key messaging
+- Hero text and main selling points
+- Key bullet points and features
+- Overall brand summary
+
+USE CASES:
+- "Create Instagram posts for my coffee shop" + URL → extracts brand voice, menu items, vibe
+- "Make marketing content for questera.ai" → extracts tech positioning, features, target audience
+- "I run a fitness brand at fitlife.com" → extracts workout philosophy, products, tone
+
+OUTPUT USAGE:
+- Use extracted data to inform image prompts with brand colors/style
+- Use headlines and key points in captions
+- Match the brand's tone in all generated content
+- Reference specific products/services mentioned on site
+
+EXAMPLES:
+- User: "Here's my site: coolstartup.io, make me some posts"
+  → Extract brand info, then generate branded content
+- User: "Based on mybakery.com, create a promo image"
+  → Extract bakery name, specialties, style for image prompt
+- User: "Check questera.ai and make social content"
+  → Extract AI/tech positioning for relevant visuals
+
+IMPORTANT:
+- Fast and deterministic (not AI-generated research)
+- Works with any public website URL
+- Automatically normalizes URLs (adds https:// if missing)
+- Returns structured data for consistent brand messaging
+- Use this BEFORE generating images to ensure brand alignment`,
+
    parameters: {
       url: {
          type: 'string',
          required: true,
-         description: 'The website URL to extract content from (e.g., questera.ai, example.com)'
+         description: 'Website URL to extract. Can include or omit https://. Domain only works too.',
+         example: 'questera.ai'
       }
    },
 

@@ -21,13 +21,54 @@ INTENTS (EXACT VALUES)
 - chat
 
 ━━━━━━━━━━━━━━━━━━━━━━
+INTENT EXAMPLES (LEARN FROM THESE)
+━━━━━━━━━━━━━━━━━━━━━━
+<example>
+User: "create a sunset image"
+Classification: { "intent": "generate_image", "confidence": 0.95, "needs_clarification": false, "reason": "Explicit create keyword, no posting" }
+</example>
+
+<example>
+User: "make a superman image and post it to instagram"
+Classification: { "intent": "generate_and_post", "confidence": 0.95, "needs_clarification": false, "reason": "Both create AND post mentioned" }
+</example>
+
+<example>
+User: "create a post for questera.ai"
+Classification: { "intent": "website_content", "confidence": 0.9, "extracted_url": "questera.ai", "reason": "URL + content request" }
+</example>
+
+<example>
+User: "research my competitors in AI tools"
+Classification: { "intent": "deep_research", "confidence": 0.95, "needs_clarification": false, "reason": "Explicit research keyword" }
+</example>
+
+<example>
+User: "change the background to blue"
+Classification: { "intent": "edit_image", "confidence": 0.9, "needs_clarification": false, "reason": "Edit/change keyword, modifying existing" }
+</example>
+
+<example>
+User: "schedule this for tomorrow 9am"
+Classification: { "intent": "schedule_post", "confidence": 0.9, "needs_clarification": false, "reason": "Schedule keyword, image exists" }
+</example>
+
+<example>
+User: "thanks!"
+Classification: { "intent": "chat", "confidence": 0.95, "needs_clarification": false, "reason": "Conversational reply" }
+</example>
+
+<example>
+User: "automate my instagram account"
+Classification: { "intent": "generate_and_post", "confidence": 0.9, "needs_clarification": false, "reason": "Automation request = content creation" }
+</example>
+
+━━━━━━━━━━━━━━━━━━━━━━
 CLASSIFICATION RULES (PRIORITY ORDER)
 ━━━━━━━━━━━━━━━━━━━━━━
 1. WEBSITE CONTENT: If user mentions a URL/website AND wants content/post/image for it → website_content
-   Examples: "create a post for questera.ai", "make an image for my website example.com", "Instagram caption for mysite.io"
 
-2. DEEP RESEARCH (EXPLICIT ONLY): ONLY if user says: research, analyze, compare, report, competitive analysis → deep_research
-   Examples: "research my competitors", "analyze the market for AI tools", "write a report on trends"
+2. DEEP RESEARCH (EXPLICIT ONLY): ONLY if user says: research, analyze, compare, report → deep_research
    ⚠️ Do NOT use for simple content requests - only explicit research requests
 
 3. AUTOMATION/CONTENT REQUESTS → generate_and_post (HIGH PRIORITY):
@@ -35,28 +76,24 @@ CLASSIFICATION RULES (PRIORITY ORDER)
    - "manage my [account]" → generate_and_post
    - "create content for my [account]" → generate_and_post
    - "generate a new post" → generate_and_post
-   - "create stories/reels/post for [account]" → generate_and_post
-   - "help me with content for [platform]" → generate_and_post
-   - User mentions account name + content creation → generate_and_post
-
    ⚠️ NEVER classify these as "chat" - they are clear action requests!
 
-3. COMPOUND ACTIONS: If user says BOTH (create/generate/make image) AND (post/publish/schedule/instagram) → generate_and_post
-   Examples: "create an image and post it", "make a superman image and post to instagram"
+4. COMPOUND ACTIONS: If user says BOTH (create/generate/make) AND (post/publish/schedule) → generate_and_post
 
-4. If user ONLY says: create, generate, make an image (NO posting mentioned) → generate_image
+5. If user ONLY says: create, generate, make an image (NO posting) → generate_image
 
-5. If user ONLY says: edit, change, modify, replace → edit_image
+6. If user ONLY says: edit, change, modify, replace → edit_image
 
-6. If user ONLY says: post, publish, schedule (image already exists) → schedule_post
+7. If user ONLY says: post, publish, schedule (image exists) → schedule_post
 
-7. Short conversational replies ("yes", "ok", "sure", "thanks", "hey", "hello", "hi") → chat
+8. Short conversational replies ("yes", "ok", "thanks", "hey", "hi") → chat
 
-8. If intent is unclear → needs_clarification = true
+9. If intent is unclear → needs_clarification = true
 
+CRITICAL RULES:
 - NEVER ignore the "post" part of a compound request
 - NEVER guess intent
-- website_content is for GROUNDING (fast), deep_research is for DISCOVERY (slow)
+- website_content = GROUNDING (fast), deep_research = DISCOVERY (slow)
 
 ━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT FORMAT (JSON ONLY)

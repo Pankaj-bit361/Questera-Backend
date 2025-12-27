@@ -307,6 +307,8 @@ class VideoController {
                 referenceImagesCount: operationConfig.config?.referenceImages?.length || 0
             });
 
+            console.log('📝 [Video] Prompt:',prompt, operationConfig.prompt);
+
             // Start generation
             let operation = await this.ai.models.generateVideos(operationConfig);
             assistantMsg.operationId = operation.name;
