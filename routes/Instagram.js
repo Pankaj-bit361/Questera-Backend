@@ -205,10 +205,15 @@ instagramRouter.get('/page-content/:userId/:pageId', async (req, res) => {
     let pageInfo = null;
 
     // Search through all accounts to find matching page
+    console.log('[PAGE-CONTENT] Looking for pageId:', pageId);
+    console.log('[PAGE-CONTENT] Found', instagramDocs.length, 'instagram docs');
+
     for (const doc of instagramDocs) {
       // Check accounts array (multi-account structure)
       if (doc.accounts && doc.accounts.length > 0) {
+        console.log('[PAGE-CONTENT] Doc has', doc.accounts.length, 'accounts');
         for (const acc of doc.accounts) {
+          console.log('[PAGE-CONTENT] Checking account:', acc.facebookPageName, 'pageId:', acc.facebookPageId, 'hasToken:', !!acc.accessToken, 'tokenLength:', acc.accessToken?.length);
           // Match by facebookPageId and use the account's accessToken
           if (acc.facebookPageId === pageId && acc.accessToken && acc.isConnected !== false) {
             pageAccessToken = acc.accessToken;
@@ -216,7 +221,8 @@ instagramRouter.get('/page-content/:userId/:pageId', async (req, res) => {
               id: acc.facebookPageId,
               name: acc.facebookPageName,
             };
-            console.log('[PAGE-CONTENT] Found token from accounts array for page:', acc.facebookPageName);
+            console.log('[PAGE-CONTENT] MATCHED! Using token for page:', acc.facebookPageName);
+            console.log('[PAGE-CONTENT] Token first 30 chars:', acc.accessToken.substring(0, 30) + '...');
             break;
           }
         }
@@ -258,20 +264,44 @@ instagramRouter.get('/page-content/:userId/:pageId', async (req, res) => {
     // /posts only includes posts made by the page itself
     console.log('[PAGE-CONTENT] Fetching posts for page:', pageId);
 
-    const feedUrl = `https://graph.facebook.com/v21.0/${pageId}/feed?fields=id,message,story,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),comments.summary(true),reactions.summary(true)&limit=25&access_token=${pageAccessToken}`;
-    const feedResponse = await fetch(feedUrl);
-    const feedData = await feedResponse.json();
+    // Fields for page posts - comments.summary requires pages_read_user_content which may not be granted for all pages
+    // So we use likes.summary and reactions.summary which work with pages_read_engagement
+    const fullFields = 'id,message,story,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),reactions.summary(true)';
+    // Fallback to simple fields if engagement fields still fail
+    const simpleFields = 'id,message,story,created_time,full_picture,attachments{media_type,url,media}';
 
-    console.log('[PAGE-CONTENT] Feed API response:', JSON.stringify(feedData, null, 2));
+    let feedUrl = `https://graph.facebook.com/v21.0/${pageId}/feed?fields=${fullFields}&limit=25&access_token=${pageAccessToken}`;
+    let feedResponse = await fetch(feedUrl);
+    let feedData = await feedResponse.json();
+
+    console.log('[PAGE-CONTENT] Feed API response (full fields):', JSON.stringify(feedData, null, 2));
+
+    // If full fields fail with permission error, retry with simple fields
+    if (feedData.error && feedData.error.code === 200) {
+      console.log('[PAGE-CONTENT] Full fields failed, retrying with simple fields...');
+      feedUrl = `https://graph.facebook.com/v21.0/${pageId}/feed?fields=${simpleFields}&limit=25&access_token=${pageAccessToken}`;
+      feedResponse = await fetch(feedUrl);
+      feedData = await feedResponse.json();
+      console.log('[PAGE-CONTENT] Feed API response (simple fields):', JSON.stringify(feedData, null, 2));
+    }
 
     // Use feed data (more complete) or fall back to posts endpoint
     let postsData = feedData;
     if (feedData.error || !feedData.data || feedData.data.length === 0) {
       console.log('[PAGE-CONTENT] Feed empty or error, trying /posts endpoint');
-      const postsUrl = `https://graph.facebook.com/v21.0/${pageId}/posts?fields=id,message,story,created_time,full_picture,attachments{media_type,url,media},shares,likes.summary(true),comments.summary(true),reactions.summary(true)&limit=25&access_token=${pageAccessToken}`;
-      const postsResponse = await fetch(postsUrl);
+      let postsUrl = `https://graph.facebook.com/v21.0/${pageId}/posts?fields=${fullFields}&limit=25&access_token=${pageAccessToken}`;
+      let postsResponse = await fetch(postsUrl);
       postsData = await postsResponse.json();
       console.log('[PAGE-CONTENT] Posts API response:', JSON.stringify(postsData, null, 2));
+
+      // If posts with full fields also fail, try simple fields
+      if (postsData.error && postsData.error.code === 200) {
+        console.log('[PAGE-CONTENT] Posts full fields failed, retrying with simple fields...');
+        postsUrl = `https://graph.facebook.com/v21.0/${pageId}/posts?fields=${simpleFields}&limit=25&access_token=${pageAccessToken}`;
+        postsResponse = await fetch(postsUrl);
+        postsData = await postsResponse.json();
+        console.log('[PAGE-CONTENT] Posts API response (simple fields):', JSON.stringify(postsData, null, 2));
+      }
     }
 
     // Fetch Page insights (engagement metrics)
