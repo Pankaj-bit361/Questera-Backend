@@ -4,11 +4,11 @@ const SocialAccount = require('../models/socialAccount');
 /**
  * Instagram Service
  * Handles Instagram Graph API integration for posting and account management
- * 
+ *
  * Instagram posting requires:
  * 1. Facebook App with Instagram Graph API permissions
  * 2. Instagram Business/Creator Account connected to Facebook Page
- * 3. Page Access Token with instagram_content_publish permission
+ * 3. Page Access Token with instagram_business_content_publish permission
  */
 class InstagramService {
   constructor() {
@@ -18,15 +18,20 @@ class InstagramService {
 
   /**
    * Get OAuth URL for connecting Instagram account
+   * All permissions needed for Instagram Business accounts
    */
   getOAuthUrl(redirectUri, state) {
     const clientId = process.env.FACEBOOK_APP_ID;
     const scopes = [
-      'instagram_basic',
-      'instagram_content_publish',
-      'instagram_manage_insights',
-      'pages_show_list',
-      'pages_read_engagement',
+      'public_profile',                      // Basic profile info
+      'instagram_basic',                     // Basic Instagram access
+      'instagram_business_basic',            // Instagram Business basic
+      'pages_show_list',                     // See connected Pages
+      'instagram_manage_comments',           // Manage comments
+      'instagram_manage_insights',           // Access insights/analytics
+      'instagram_business_content_publish',  // Publish content to Instagram
+      'pages_read_engagement',               // Read Page engagement
+      'business_management',                 // Business portfolio access
     ].join(',');
 
     return `https://www.facebook.com/${this.graphApiVersion}/dialog/oauth?` +
