@@ -56,17 +56,17 @@ class InstagramController {
       const state = `graph_${Math.random().toString(36).substring(7)}`;
 
       // Meta Graph API via Facebook OAuth (full features)
-      // All permissions needed for Instagram Business accounts
+      // Note: instagram_business_basic and instagram_business_content_publish are App Review permissions,
+      // NOT OAuth scopes. Use instagram_basic and instagram_content_publish in OAuth scope.
       const scope = [
-        'public_profile',                      // Basic profile info (renewed)
-        'instagram_basic',                     // Basic Instagram access (renewed)
-        'instagram_business_basic',            // Instagram Business basic (approved)
-        'pages_show_list',                     // See connected Pages (approved)
-        'instagram_manage_comments',           // Manage comments (approved)
-        'instagram_manage_insights',           // Access insights/analytics (approved)
-        'instagram_business_content_publish',  // Publish content (pending)
-        'pages_read_engagement',               // Read Page engagement (pending)
-        'business_management',                 // Business portfolio access (renewed)
+        'public_profile',              // Basic profile info
+        'instagram_basic',             // Basic Instagram access
+        'instagram_content_publish',   // Publish content (grants instagram_business_content_publish after App Review)
+        'instagram_manage_comments',   // Manage comments
+        'instagram_manage_insights',   // Access insights/analytics
+        'pages_show_list',             // See connected Pages
+        'pages_read_engagement',       // Read Page engagement
+        'business_management',         // Business portfolio access
       ].join(',');
       const oauthUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth?` +
         `client_id=${this.appId}` +

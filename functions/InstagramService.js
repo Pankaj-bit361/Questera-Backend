@@ -18,20 +18,19 @@ class InstagramService {
 
   /**
    * Get OAuth URL for connecting Instagram account
-   * All permissions needed for Instagram Business accounts
+   * Note: instagram_business_* are App Review permissions, NOT OAuth scopes
    */
   getOAuthUrl(redirectUri, state) {
     const clientId = process.env.FACEBOOK_APP_ID;
     const scopes = [
-      'public_profile',                      // Basic profile info
-      'instagram_basic',                     // Basic Instagram access
-      'instagram_business_basic',            // Instagram Business basic
-      'pages_show_list',                     // See connected Pages
-      'instagram_manage_comments',           // Manage comments
-      'instagram_manage_insights',           // Access insights/analytics
-      'instagram_business_content_publish',  // Publish content to Instagram
-      'pages_read_engagement',               // Read Page engagement
-      'business_management',                 // Business portfolio access
+      'public_profile',              // Basic profile info
+      'instagram_basic',             // Basic Instagram access
+      'instagram_content_publish',   // Publish content (grants instagram_business_content_publish after App Review)
+      'instagram_manage_comments',   // Manage comments
+      'instagram_manage_insights',   // Access insights/analytics
+      'pages_show_list',             // See connected Pages
+      'pages_read_engagement',       // Read Page engagement
+      'business_management',         // Business portfolio access
     ].join(',');
 
     return `https://www.facebook.com/${this.graphApiVersion}/dialog/oauth?` +
