@@ -56,7 +56,18 @@ class InstagramController {
       const state = `graph_${Math.random().toString(36).substring(7)}`;
 
       // Meta Graph API via Facebook OAuth (full features)
-      const scope = 'pages_show_list,instagram_basic,instagram_manage_comments,instagram_content_publish,pages_read_engagement,business_management,instagram_manage_insights';
+      // All permissions needed for Instagram Business accounts
+      const scope = [
+        'public_profile',                      // Basic profile info (renewed)
+        'instagram_basic',                     // Basic Instagram access (renewed)
+        'instagram_business_basic',            // Instagram Business basic (approved)
+        'pages_show_list',                     // See connected Pages (approved)
+        'instagram_manage_comments',           // Manage comments (approved)
+        'instagram_manage_insights',           // Access insights/analytics (approved)
+        'instagram_business_content_publish',  // Publish content (pending)
+        'pages_read_engagement',               // Read Page engagement (pending)
+        'business_management',                 // Business portfolio access (renewed)
+      ].join(',');
       const oauthUrl = `https://www.facebook.com/${this.apiVersion}/dialog/oauth?` +
         `client_id=${this.appId}` +
         `&redirect_uri=${encodeURIComponent(this.redirectUri)}` +
@@ -751,9 +762,9 @@ class InstagramController {
       // Check for invalid/zero ID - Instagram sometimes returns "0" when there's an issue
       // Also check for numeric 0 and string "0"
       const isInvalidId = !carouselContainerId ||
-                          carouselContainerId === '0' ||
-                          carouselContainerId === 0 ||
-                          String(carouselContainerId) === '0';
+        carouselContainerId === '0' ||
+        carouselContainerId === 0 ||
+        String(carouselContainerId) === '0';
 
       console.log('📦 [INSTAGRAM] Is invalid ID?', isInvalidId);
 
